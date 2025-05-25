@@ -33,8 +33,7 @@ class {{ class_name }}(Control):
         })
         return self.invoke_method("{{ method.name }}", {"data": args}, wait_for_result=True, wait_timeout=wait_timeout)
 
-    async def {{ method.py_name }}_async(self{% if param_names %}, {{ param_names | join(', ') }}{% endif %},
-                                      wait_timeout: float = 25):
+    async def {{ method.py_name }}_async(self{% if param_names %}, {{ param_names | join(', ') }}{% endif %}, wait_timeout: float = 25):
         """
         {{ method.docstring | default("No description.", true) }} (async)
         {% if method.is_getter %}Getter method.{% elif method.is_setter %}Setter method.{% endif %}

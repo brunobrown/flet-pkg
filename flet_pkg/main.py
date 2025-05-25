@@ -127,8 +127,8 @@ def _camel_to_snake(name: str) -> str:
 if __name__ == "__main__":
     from flet_pkg.parser import parse_dart_package
 
-    package_name = "health"
-    widget_class_name = "Health"
+    package_name = "onesignal_flutter"
+    widget_class_name = "OnesignalFlutter"
     python_output_dir = Path("python_wrappers")
     dart_output_dir = Path("dart_wrappers")
     dart_package_path = Path("package/flutter")
