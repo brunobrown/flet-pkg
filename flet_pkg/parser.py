@@ -10,13 +10,22 @@ UI_METHODS = {
     "debugFillProperties", "didChangeDependencies",
     "didUpdateWidget", "setState", "toString", "noSuchMethod",
     "lifecycleInit", "MethodChannel",
-    "jsonRepresentation", "convertToJsonString"
+    "jsonRepresentation", "convertToJsonString",
+    "if", "if_", "that", "and_", "setupDefault",
+    "createState", "fromJson", "toJson", "toJsonString", "jsonEncode",
+    "instance", "callback", "refuseInCallingOnInvitationReceived"
 }
 
-# Sufixos de classes irrelevantes
+LIFECYCLE_METHODS = {
+    "onLoad", "onMount", "onRemove", "onChildrenChanged", "onGameResize",
+    "update", "render", "dispose", "renderDebugMode", "renderTree", "updateTree"
+}
+
+# Sufixos ou palavras-chave para classes irrelevantes
 UI_CLASS_SUFFIXES = (
-    "Widget", "Control", "State", "Delegate",
-    "Event", "Data", "Result", "Notification"
+    "Widget", "Control", "State", "Delegate", "Event", "Data", "Result",
+    "Notification", "Manager", "View", "Page", "Overlay", "Config", "Protocol",
+    "Private", "Impl", "Guard"
 )
 
 def camel_to_snake(name: str) -> str:
@@ -25,18 +34,23 @@ def camel_to_snake(name: str) -> str:
 def camel_to_lower(name: str) -> str:
     return name[0].lower() + name[1:] if name else name
 
-def should_skip_class(class_name: str) -> bool:
+def should_skip_class(class_name: str, docstring: str = "") -> bool:
     return (
         class_name.startswith('_')
         or class_name.endswith(UI_CLASS_SUFFIXES)
+        or any(suffix in class_name for suffix in UI_CLASS_SUFFIXES)
+        or "nodoc" in docstring.lower()
+        or "internal" in docstring.lower()
     )
 
 def should_skip_method(method_name: str) -> bool:
     return (
         method_name in UI_METHODS
+        or method_name in LIFECYCLE_METHODS
         or method_name.startswith('_')
+        or method_name.startswith('on')
         or not method_name.isidentifier()
-        or method_name[0].isupper()  # provável construtor ou enum
+        or method_name[0].isupper()
     )
 
 def parse_dart_package(package_path: Path) -> Dict[str, Any]:
@@ -51,22 +65,23 @@ def parse_dart_package(package_path: Path) -> Dict[str, Any]:
             content = file.read()
 
             class_matches = re.finditer(
-                pattern=r'(?:@[^\n]*\n)*'
+                r'(?:@[^\n]*\n)*'
                 r'class\s+(\w+)'
                 r'(?:\s+extends\s+\w+)?'
                 r'(?:\s+with\s+[\w\s,]+)?'
                 r'(?:\s+implements\s+[\w\s,]+)?'
                 r'\s*{',
-                string=content
+                content
             )
 
             for match in class_matches:
                 class_name = match.group(1)
-                if should_skip_class(class_name):
-                    continue
 
-                doc_match = re.search(r'/\*\*(.*?)\*/', content[:match.start()], re.DOTALL)
-                class_doc = doc_match.group(1).strip() if doc_match else None
+                doc_match = re.search(r'(///.*?$|/\*\*(.*?)\*/)', content[:match.start()], re.DOTALL | re.MULTILINE)
+                class_doc = clean_docstring(doc_match) if doc_match else ""
+
+                if should_skip_class(class_name, class_doc):
+                    continue
 
                 class_block = extract_code_block(content[match.end()-1:])
                 if not class_block:
@@ -76,12 +91,12 @@ def parse_dart_package(package_path: Path) -> Dict[str, Any]:
                 seen_method_names = set()
 
                 method_matches = re.finditer(
-                    pattern=r'(?:@[^\n]*\n)*'  # captura anotações acima do método
-                    r'(?:static\s+)?'  # captura static opcional
-                    r'(?:Future<.*?>|Future|void|String|bool|int|double|dynamic|\w+)\s+'  # tipo de retorno
-                    r'(get\s+|set\s+|)?(\w+)'  # getter/setter opcional + nome
-                    r'\s*\(([^)]*)\)',  # parâmetros
-                    string=class_block
+                    r'(?:@[^\n]*\n)*'
+                    r'(?:static\s+)?'
+                    r'(?:Future<.*?>|Future|void|String|bool|int|double|dynamic|Map<.*?>|List<.*?>|\w+)\s+'
+                    r'(get\s+|set\s+|)?(\w+)'
+                    r'\s*\(([^)]*)\)',
+                    class_block
                 )
 
                 for m in method_matches:
@@ -99,8 +114,8 @@ def parse_dart_package(package_path: Path) -> Dict[str, Any]:
                     if keyword.iskeyword(method_name):
                         method_name += "_"
 
-                    method_doc_match = re.search(r'/\*\*(.*?)\*/', content[:m.start()], re.DOTALL)
-                    method_doc = method_doc_match.group(1).strip() if method_doc_match else None
+                    method_doc_match = re.search(r'(///.*?$|/\*\*(.*?)\*/)', content[:m.start()], re.DOTALL | re.MULTILINE)
+                    method_doc = clean_docstring(method_doc_match) if method_doc_match else None
 
                     params = []
                     if m.group(3):
@@ -162,6 +177,15 @@ def split_params(param_str: str) -> List[str]:
     if current:
         params.append(''.join(current).strip())
     return params
+
+def clean_docstring(match) -> Optional[str]:
+    if not match:
+        return None
+    doc = match.group(1) or match.group(2) or ''
+    doc = re.sub(r'///+', '', doc)
+    doc = re.sub(r'/\*\*|\*/', '', doc)
+    doc = doc.strip().replace('\n', ' ').replace('  ', ' ')
+    return doc
 
 
 if __name__ == "__main__":
