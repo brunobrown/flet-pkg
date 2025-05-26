@@ -137,7 +137,7 @@ if __name__ == "__main__":
     download_package_from_pubdev(package_name, dart_package_path)
 
     # Then parse the Dart package
-    api_info = parse_dart_package(dart_package_path)
+    api_info = parse_dart_package(dart_package_path, strict=True)
     pprint(api_info)
 
     # Then generate python_wrappers and dart_wrappers

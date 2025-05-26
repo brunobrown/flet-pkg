@@ -25,7 +25,7 @@ LIFECYCLE_METHODS = {
 UI_CLASS_SUFFIXES = (
     "Widget", "Control", "State", "Delegate", "Event", "Data", "Result",
     "Notification", "Manager", "View", "Page", "Overlay", "Config", "Protocol",
-    "Private", "Impl", "Guard"
+    "Private", "Impl", "Guard", "Foreground", "Background", "Internal", "Instance", "Plugins", "Button", "ServiceAPIPrivateImpl"
 )
 
 def camel_to_snake(name: str) -> str:
@@ -43,17 +43,18 @@ def should_skip_class(class_name: str, docstring: str = "") -> bool:
         or "internal" in docstring.lower()
     )
 
-def should_skip_method(method_name: str) -> bool:
+def should_skip_method(method_name: str, docstring: str = "") -> bool:
     return (
         method_name in UI_METHODS
         or method_name in LIFECYCLE_METHODS
         or method_name.startswith('_')
         or method_name.startswith('on')
+        or "nodoc" in docstring.lower()
         or not method_name.isidentifier()
         or method_name[0].isupper()
     )
 
-def parse_dart_package(package_path: Path) -> Dict[str, Any]:
+def parse_dart_package(package_path: Path, strict: bool = False) -> Dict[str, Any]:
     lib_dir = package_path / "lib"
     if not lib_dir.exists():
         raise FileNotFoundError(f"Directory {lib_dir} does not exist.")
@@ -65,13 +66,13 @@ def parse_dart_package(package_path: Path) -> Dict[str, Any]:
             content = file.read()
 
             class_matches = re.finditer(
-                r'(?:@[^\n]*\n)*'
+                pattern=r'(?:@[^\n]*\n)*'
                 r'class\s+(\w+)'
                 r'(?:\s+extends\s+\w+)?'
                 r'(?:\s+with\s+[\w\s,]+)?'
                 r'(?:\s+implements\s+[\w\s,]+)?'
                 r'\s*{',
-                content
+                string=content
             )
 
             for match in class_matches:
@@ -91,12 +92,12 @@ def parse_dart_package(package_path: Path) -> Dict[str, Any]:
                 seen_method_names = set()
 
                 method_matches = re.finditer(
-                    r'(?:@[^\n]*\n)*'
+                    pattern=r'(?:@[^\n]*\n)*'
                     r'(?:static\s+)?'
                     r'(?:Future<.*?>|Future|void|String|bool|int|double|dynamic|Map<.*?>|List<.*?>|\w+)\s+'
                     r'(get\s+|set\s+|)?(\w+)'
                     r'\s*\(([^)]*)\)',
-                    class_block
+                    string=class_block
                 )
 
                 for m in method_matches:
@@ -104,18 +105,18 @@ def parse_dart_package(package_path: Path) -> Dict[str, Any]:
                     is_setter = m.group(1) == 'set'
                     method_name = m.group(2)
 
+                    method_doc_match = re.search(r'(///.*?$|/\*\*(.*?)\*/)', content[:m.start()], re.DOTALL | re.MULTILINE)
+                    method_doc = clean_docstring(method_doc_match) if method_doc_match else ""
+
                     if (
                         method_name in seen_method_names
-                        or should_skip_method(method_name)
+                        or should_skip_method(method_name, method_doc)
                     ):
                         continue
                     seen_method_names.add(method_name)
 
                     if keyword.iskeyword(method_name):
                         method_name += "_"
-
-                    method_doc_match = re.search(r'(///.*?$|/\*\*(.*?)\*/)', content[:m.start()], re.DOTALL | re.MULTILINE)
-                    method_doc = clean_docstring(method_doc_match) if method_doc_match else None
 
                     params = []
                     if m.group(3):
@@ -135,8 +136,11 @@ def parse_dart_package(package_path: Path) -> Dict[str, Any]:
                     })
 
                 filtered_methods = [
-                    m for m in methods if not should_skip_method(m['name'])
+                    m for m in methods if not should_skip_method(m['name'], m['docstring'] or "")
                 ]
+
+                if strict and len(filtered_methods) < 2:
+                    continue
 
                 if filtered_methods:
                     api_info[class_name] = {
