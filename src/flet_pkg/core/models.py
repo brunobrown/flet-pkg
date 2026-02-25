@@ -71,6 +71,8 @@ class DartPackageAPI:
     typedefs: dict[str, str] = field(default_factory=dict)
     reexported_types: dict[str, str] = field(default_factory=dict)
     """Mapping of type name → source package for re-exported public API types."""
+    top_level_functions: list[DartMethod] = field(default_factory=list)
+    """Top-level functions (not inside any class) from the Dart package."""
 
 
 # ---------------------------------------------------------------------------
@@ -169,6 +171,16 @@ class SubModulePlan:
 
 
 @dataclass
+class StubDataClass:
+    """Stub for a re-exported data class from platform_interface."""
+
+    python_name: str
+    fields: list[tuple[str, str]] = field(default_factory=list)
+    """(field_name, field_type) pairs."""
+    docstring: str = ""
+
+
+@dataclass
 class GenerationPlan:
     """Complete plan for code generation. Fed to generators."""
 
@@ -182,6 +194,8 @@ class GenerationPlan:
     events: list[EventPlan] = field(default_factory=list)
     sub_modules: list[SubModulePlan] = field(default_factory=list)
     enums: list[EnumPlan] = field(default_factory=list)
+    stub_data_classes: list[StubDataClass] = field(default_factory=list)
+    """Stub data classes for re-exported types from platform_interface."""
     dart_import: str = ""
     dart_listeners: list[dict[str, str]] = field(default_factory=list)
     dart_main_class: str = ""

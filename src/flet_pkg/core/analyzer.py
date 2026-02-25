@@ -20,9 +20,10 @@ from flet_pkg.core.models import (
     MethodPlan,
     ParamPlan,
     PropertyPlan,
+    StubDataClass,
     SubModulePlan,
 )
-from flet_pkg.core.parser import camel_to_snake
+from flet_pkg.core.parser import camel_to_snake, parse_dart_package_api
 from flet_pkg.core.type_map import map_dart_type, map_return_type
 
 
@@ -56,8 +57,13 @@ class PackageAnalyzer:
         base_class = "ft.Service" if extension_type == "service" else "ft.LayoutControl"
         control_name_lower = control_name.lower()
 
-        # Build set of known re-exported type names for type sanitization
-        self._known_types = frozenset(api.reexported_types.keys())
+        # Build set of known type names for type sanitization.
+        # Includes re-exported types AND locally parsed enum names and
+        # helper class names so they are not replaced with `dict | None`.
+        known = set(api.reexported_types.keys())
+        known.update(e.name for e in api.enums)
+        known.update(h.name for h in api.helper_classes)
+        self._known_types = frozenset(known)
 
         # Detect the main SDK class (the one matching the control name)
         dart_main_class = self._detect_main_class(api, control_name)
@@ -127,8 +133,19 @@ class PackageAnalyzer:
                         cls, plan, control_name_lower, dart_main_class, api
                     )
 
+        # Process top-level functions as main methods
+        for func in api.top_level_functions:
+            method_plan = self._build_method_plan(
+                func, "", dart_main_class, dart_main_class
+            )
+            if not any(
+                m.python_name == method_plan.python_name for m in plan.main_methods
+            ):
+                plan.main_methods.append(method_plan)
+
         # Process enums — only keep those that are used or commonly useful
         used_enums = self._detect_used_enums(api, plan)
+        generated_type_names: set[str] = set()
         for dart_enum in api.enums:
             if dart_enum.name in used_enums or self._is_useful_enum(dart_enum, plan):
                 plan.enums.append(
@@ -138,6 +155,15 @@ class PackageAnalyzer:
                         docstring=dart_enum.docstring,
                     )
                 )
+                generated_type_names.add(dart_enum.name)
+
+        # Generate stub types for re-exported types from platform_interface
+        # that are referenced by methods but not locally defined.
+        self._generate_reexported_types(api, plan, generated_type_names)
+
+        # Generate data classes from local helper classes (Configuration,
+        # Options, Params, etc.) that are referenced as method parameters.
+        self._generate_local_data_classes(api, plan, generated_type_names)
 
         # Set error event class name with short prefix
         prefix = "OS" if control_name.lower().startswith("one") else control_name
@@ -155,6 +181,113 @@ class PackageAnalyzer:
         ]
 
         return plan
+
+    def resolve_platform_types(
+        self,
+        api: DartPackageAPI,
+        plan: GenerationPlan,
+    ) -> None:
+        """Download platform_interface packages and resolve stub types.
+
+        Replaces UNKNOWN-only enum stubs and ``data: dict`` stub data
+        classes with real values/fields parsed from the source packages.
+        """
+        from pathlib import Path
+
+        from flet_pkg.core.downloader import PubDevDownloader
+
+        # Collect unique source packages that need resolution
+        packages_to_resolve: dict[str, list[str]] = {}
+        for type_name, source_pkg in api.reexported_types.items():
+            if not source_pkg:
+                continue
+            packages_to_resolve.setdefault(source_pkg, []).append(type_name)
+
+        if not packages_to_resolve:
+            return
+
+        downloader = PubDevDownloader()
+
+        for pkg_name, type_names in packages_to_resolve.items():
+            try:
+                pkg_path = downloader.download(pkg_name)
+            except Exception:
+                continue
+
+            try:
+                platform_api = parse_dart_package_api(pkg_path)
+            except Exception:
+                continue
+
+            # Build lookup maps from the platform_interface source
+            enum_map: dict[str, list[str]] = {}
+            for dart_enum in platform_api.enums:
+                enum_map[dart_enum.name] = dart_enum.values
+
+            helper_map: dict[str, list[tuple[str, str]]] = {}
+            for helper_cls in platform_api.helper_classes:
+                fields = []
+                for method in helper_cls.methods:
+                    if method.is_getter and not method.params:
+                        if method.name == helper_cls.name:
+                            continue
+                        field_name = camel_to_snake(method.name)
+                        field_type = map_dart_type(method.return_type)
+                        fields.append((field_name, field_type))
+                if fields:
+                    helper_map[helper_cls.name] = fields
+
+            # Standard Dart object members to skip when extracting fields
+            _OBJECT_MEMBERS = {
+                "hashCode", "runtimeType", "toString", "noSuchMethod",
+                "operator", "hash_code", "runtime_type",
+            }
+
+            def _clean_fields(raw_fields: list[tuple[str, str]]) -> list[tuple[str, str]]:
+                """Filter out Dart object members and sanitize types."""
+                cleaned = []
+                for fname, ftype in raw_fields:
+                    if fname in _OBJECT_MEMBERS:
+                        continue
+                    # Sanitize unknown types to str | None
+                    ftype = _sanitize_python_type(ftype, self._known_types)
+                    cleaned.append((fname, ftype))
+                return cleaned
+
+            # Also check regular classes for data classes with getters/fields
+            for cls in platform_api.classes:
+                if cls.name in helper_map:
+                    continue
+                fields = []
+                for method in cls.methods:
+                    if method.is_getter and not method.params:
+                        if method.name == cls.name:
+                            continue
+                        field_name = camel_to_snake(method.name)
+                        field_type = map_dart_type(method.return_type)
+                        fields.append((field_name, field_type))
+                if fields:
+                    helper_map[cls.name] = fields
+
+            # Clean all fields
+            for name in helper_map:
+                helper_map[name] = _clean_fields(helper_map[name])
+
+            # Update plan enums with real values
+            for enum_plan in plan.enums:
+                if enum_plan.python_name in enum_map:
+                    real_values = enum_map[enum_plan.python_name]
+                    if real_values:
+                        enum_plan.values = [(v, v.lower()) for v in real_values]
+                        enum_plan.docstring = ""
+
+            # Update plan stub data classes with real fields
+            for stub in plan.stub_data_classes:
+                if stub.python_name in helper_map:
+                    real_fields = helper_map[stub.python_name]
+                    if real_fields:
+                        stub.fields = real_fields
+                        stub.docstring = ""
 
     # ------------------------------------------------------------------
     # Main SDK class detection
@@ -514,6 +647,18 @@ class PackageAnalyzer:
                     plan.events.append(event)
                 continue
 
+            # Detect Stream<T> getter as event source (e.g., onBatteryStateChanged)
+            stream_event = self._detect_stream_event(
+                method, plan.control_name, api
+            )
+            if stream_event:
+                if not any(
+                    e.python_attr_name == stream_event.python_attr_name
+                    for e in plan.events
+                ):
+                    plan.events.append(stream_event)
+                continue
+
             # Skip remove*Listener/Observer methods
             if self._is_remove_listener_method(method):
                 continue
@@ -526,8 +671,10 @@ class PackageAnalyzer:
             if self._is_property_setter(method, plan):
                 continue
 
-            # Check if this is a getter -> property
-            if method.is_getter and not method.params:
+            # Check if this is a synchronous getter -> property
+            # Async getters (Future<T>) become methods, not properties,
+            # because they require an await call to Flutter.
+            if method.is_getter and not method.params and not method.is_async:
                 prop = PropertyPlan(
                     python_name=camel_to_snake(method.name),
                     python_type=map_dart_type(method.return_type),
@@ -680,7 +827,61 @@ class PackageAnalyzer:
         )
 
     # ------------------------------------------------------------------
-    # Event detection
+    # Stream-based event detection
+    # ------------------------------------------------------------------
+
+    def _detect_stream_event(
+        self,
+        method: DartMethod,
+        control_name: str,
+        api: DartPackageAPI | None,
+    ) -> EventPlan | None:
+        """Detect Stream<T> getters as event sources.
+
+        Flutter packages commonly expose ``Stream<T> get onXxxChanged``
+        as event sources. These are converted to ``on_xxx_changed``
+        event handlers on the Python side.
+        """
+        if not method.is_getter or not method.return_type.startswith("Stream"):
+            return None
+        if not method.name.startswith("on"):
+            return None
+
+        # Extract event type from Stream<T>
+        stream_match = re.match(r"Stream<(\w+)\??>?", method.return_type)
+        event_type_name = stream_match.group(1) if stream_match else "dynamic"
+
+        # Build event name: onBatteryStateChanged → on_battery_state_changed
+        python_attr = camel_to_snake(method.name)
+        if not python_attr.startswith("on_"):
+            python_attr = f"on_{python_attr}"
+        dart_event_name = python_attr.removeprefix("on_")
+
+        # Derive event class name
+        prefix = "OS" if control_name.lower().startswith("one") else control_name
+        event_class_name = f"{prefix}{event_type_name}Event"
+        if event_type_name.endswith("Event"):
+            event_class_name = f"{prefix}{event_type_name}"
+
+        # Extract fields from helper class if available
+        fields: list[tuple[str, str]] = [("value", "str")]
+        if api:
+            for helper_cls in api.helper_classes:
+                if helper_cls.name == event_type_name:
+                    fields = self._extract_fields_from_helper(helper_cls, api)
+                    break
+
+        return EventPlan(
+            python_attr_name=python_attr,
+            event_class_name=event_class_name,
+            dart_event_name=dart_event_name,
+            fields=fields,
+            dart_listener_method=method.name,
+            dart_sdk_accessor="",
+        )
+
+    # ------------------------------------------------------------------
+    # Event detection (listener pattern)
     # ------------------------------------------------------------------
 
     def _detect_event(
@@ -973,6 +1174,147 @@ class PackageAnalyzer:
         return [("data", "dict")]
 
     # ------------------------------------------------------------------
+    # Re-exported type generation
+    # ------------------------------------------------------------------
+
+    def _generate_reexported_types(
+        self,
+        api: DartPackageAPI,
+        plan: GenerationPlan,
+        generated_type_names: set[str],
+    ) -> None:
+        """Generate stub types for re-exported types from platform_interface.
+
+        Uses naming heuristics to determine if a re-exported type is an
+        enum, a data class, or an exception type, and generates appropriate
+        stubs so that generated code can reference them without NameError.
+        """
+        # Collect all type names referenced in the plan
+        referenced = self._collect_referenced_types(plan)
+
+        # Suffixes that indicate enum types
+        _ENUM_SUFFIXES = ("Type", "State", "Status", "Mode", "Level")
+        # Suffixes that indicate data/params classes
+        _DATA_SUFFIXES = ("Params", "Result", "Options", "Configuration", "Config", "Info")
+        # Suffixes to skip (widget/callback types not useful on Python side)
+        _SKIP_SUFFIXES = ("Builder", "Delegate", "Callback", "Link", "Target")
+
+        for type_name, _source_pkg in api.reexported_types.items():
+            if type_name in generated_type_names:
+                continue  # Already generated from local source
+            if type_name.startswith("_"):
+                continue
+            if any(type_name.endswith(s) for s in _SKIP_SUFFIXES):
+                continue
+            # Only generate types that are actually referenced
+            if type_name not in referenced and type_name not in self._known_types:
+                continue
+
+            if any(type_name.endswith(s) for s in _ENUM_SUFFIXES):
+                # Generate as enum with a string value fallback
+                plan.enums.append(
+                    EnumPlan(
+                        python_name=type_name,
+                        values=[("UNKNOWN", "unknown")],
+                        docstring=(
+                            f"{type_name} enum (stub — values should be filled "
+                            f"from the {_source_pkg} platform interface)."
+                        ),
+                    )
+                )
+                generated_type_names.add(type_name)
+            elif any(type_name.endswith(s) for s in _DATA_SUFFIXES):
+                # Generate as a stub dataclass in types.py
+                plan.stub_data_classes.append(
+                    StubDataClass(
+                        python_name=type_name,
+                        fields=[("data", "dict")],
+                        docstring=(
+                            f"{type_name} data class (stub — fields should be "
+                            f"filled from the {_source_pkg} platform interface)."
+                        ),
+                    )
+                )
+                generated_type_names.add(type_name)
+
+    def _generate_local_data_classes(
+        self,
+        api: DartPackageAPI,
+        plan: GenerationPlan,
+        generated_type_names: set[str],
+    ) -> None:
+        """Generate Python dataclasses from local helper classes.
+
+        Detects helper classes (Configuration, Options, Params, etc.)
+        that are referenced as method parameter types and generates
+        proper Python dataclasses with their parsed fields.
+        """
+        referenced = self._collect_referenced_types(plan)
+
+        # Data class suffixes (these helper classes have useful fields)
+        _DATA_SUFFIXES = ("Configuration", "Config", "Options", "Params", "Info", "Result")
+        # Event suffixes should not be generated as data classes
+        _SKIP_SUFFIXES = ("Event", "State", "ChangedState")
+
+        for helper_cls in api.helper_classes:
+            name = helper_cls.name
+            if name in generated_type_names:
+                continue
+            if name.startswith("_"):
+                continue
+            if any(name.endswith(s) for s in _SKIP_SUFFIXES):
+                continue
+            if not any(name.endswith(s) for s in _DATA_SUFFIXES):
+                continue
+            # Only generate if actually referenced by methods
+            if name not in referenced:
+                continue
+
+            # Extract fields from the helper class methods (which includes
+            # parsed instance fields when skip_filter=False)
+            fields: list[tuple[str, str]] = []
+            for method in helper_cls.methods:
+                if method.is_getter and not method.params:
+                    # Skip constructor entries (name matches class name)
+                    if method.name == name:
+                        continue
+                    field_name = camel_to_snake(method.name)
+                    field_type = map_dart_type(method.return_type)
+                    fields.append((field_name, field_type))
+
+            if not fields:
+                fields = [("data", "dict")]
+
+            plan.stub_data_classes.append(
+                StubDataClass(
+                    python_name=name,
+                    fields=fields,
+                    docstring=helper_cls.docstring or f"{name} configuration.",
+                )
+            )
+            generated_type_names.add(name)
+
+    def _collect_referenced_types(self, plan: GenerationPlan) -> set[str]:
+        """Collect all type names referenced by methods, params, and return types."""
+        refs: set[str] = set()
+        all_methods = list(plan.main_methods)
+        for sub in plan.sub_modules:
+            all_methods.extend(sub.methods)
+        for method in all_methods:
+            # Check return type
+            base = method.return_type.split("[")[0].split("|")[0].strip()
+            if base and base[0].isupper():
+                refs.add(base)
+            for p in method.params:
+                base = p.python_type.split("[")[0].split("|")[0].strip()
+                if base and base[0].isupper():
+                    refs.add(base)
+                base_dart = p.dart_type.rstrip("?")
+                if base_dart and base_dart[0].isupper():
+                    refs.add(base_dart)
+        return refs
+
+    # ------------------------------------------------------------------
     # Enum filtering
     # ------------------------------------------------------------------
 
@@ -983,7 +1325,7 @@ class PackageAnalyzer:
         used: set[str] = set()
         enum_names = {e.name for e in api.enums}
 
-        # Check all method params and return types
+        # Check all class method params and return types
         for cls in api.classes:
             for method in cls.methods:
                 if method.return_type in enum_names:
@@ -991,6 +1333,14 @@ class PackageAnalyzer:
                 for p in method.params:
                     if p.dart_type in enum_names:
                         used.add(p.dart_type)
+
+        # Check top-level function params and return types
+        for func in api.top_level_functions:
+            if func.return_type in enum_names:
+                used.add(func.return_type)
+            for p in func.params:
+                if p.dart_type in enum_names:
+                    used.add(p.dart_type)
 
         # Check plan properties for enum type references
         for prop in plan.properties:
@@ -1001,13 +1351,14 @@ class PackageAnalyzer:
         return used
 
     def _is_useful_enum(self, dart_enum, plan: GenerationPlan) -> bool:
-        """Check if an enum is likely useful beyond direct method references.
+        """Check if an enum is likely useful for the generated extension.
 
-        Only keeps enums for log-level configuration — these are commonly
-        exposed as control properties even when not in method signatures.
+        Includes enums used for configuration, status reporting, or
+        mode selection — these are commonly part of the public API.
         """
-        name_lower = dart_enum.name.lower()
-        return "loglevel" in name_lower
+        # All locally-defined enums are useful (the parser already
+        # filters out private/internal ones)
+        return True
 
     # ------------------------------------------------------------------
     # Helper checks
@@ -1190,9 +1541,13 @@ def _sanitize_python_type(
     *known_types* contains re-exported type names from the package
     barrel file that should be preserved (e.g. ``BiometricType``).
     """
-    # Strip nullable suffix for checking
-    base = python_type.rstrip(" |None").strip()
-    is_nullable = "None" in python_type and base != "None"
+    # Strip nullable suffix for checking (use proper substring match,
+    # not rstrip which removes individual characters).
+    is_nullable = python_type.endswith("| None") or python_type.endswith("|None")
+    if is_nullable:
+        base = re.sub(r"\s*\|\s*None$", "", python_type).strip()
+    else:
+        base = python_type.strip()
 
     # Generic types (list[...], dict[...]) are fine
     if "[" in python_type:

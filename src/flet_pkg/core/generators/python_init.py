@@ -40,22 +40,23 @@ class PythonInitGenerator(CodeGenerator):
             )
             all_exports.append(sub.class_name)
 
-        # Types imports
-        if plan.events or plan.enums:
-            type_names: list[str] = []
-            for enum in plan.enums:
-                type_names.append(enum.python_name)
-            for event in plan.events:
-                type_names.append(event.event_class_name)
-            # Error event
-            type_names.append(plan.error_event_class or f"{plan.control_name}ErrorEvent")
-            type_names = sorted(set(type_names))
+        # Types imports (always include error event class)
+        type_names: list[str] = []
+        for enum in plan.enums:
+            type_names.append(enum.python_name)
+        for event in plan.events:
+            type_names.append(event.event_class_name)
+        for stub in plan.stub_data_classes:
+            type_names.append(stub.python_name)
+        # Error event is always generated
+        type_names.append(plan.error_event_class or f"{plan.control_name}ErrorEvent")
+        type_names = sorted(set(type_names))
 
-            lines.append(f"from {plan.package_name}.types import (")
-            for name in type_names:
-                lines.append(f"    {name},")
-            lines.append(")")
-            all_exports.extend(type_names)
+        lines.append(f"from {plan.package_name}.types import (")
+        for name in type_names:
+            lines.append(f"    {name},")
+        lines.append(")")
+        all_exports.extend(type_names)
 
         lines.append("")
 
@@ -72,14 +73,13 @@ class PythonInitGenerator(CodeGenerator):
             for sub in plan.sub_modules:
                 lines.append(f'    "{sub.class_name}",')
 
-        # Group: Types
-        if plan.enums or plan.events:
-            lines.append("    # Types and events")
-            for name in sorted(set(all_exports)):
-                if name != plan.control_name and name not in [
-                    s.class_name for s in plan.sub_modules
-                ]:
-                    lines.append(f'    "{name}",')
+        # Group: Types and events
+        lines.append("    # Types and events")
+        for name in sorted(set(all_exports)):
+            if name != plan.control_name and name not in [
+                s.class_name for s in plan.sub_modules
+            ]:
+                lines.append(f'    "{name}",')
 
         lines.append("]")
         lines.append("")

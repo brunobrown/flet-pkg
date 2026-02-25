@@ -63,4 +63,32 @@ class CodeGenerator(ABC):
             "false": "False",
             "null": "None",
         }
-        return _DART_TO_PYTHON.get(dart_default, dart_default)
+        if dart_default in _DART_TO_PYTHON:
+            return _DART_TO_PYTHON[dart_default]
+
+        # Dart constructor calls: `const SomeClass()`, `SomeClass()`
+        if "(" in dart_default:
+            return "None"
+
+        # Dart enum references: `SomeEnum.value`
+        if "." in dart_default:
+            return "None"
+
+        # Dart const collections: `const []`, `const {}`
+        if dart_default.startswith("const "):
+            return "None"
+
+        # Numeric literals pass through
+        try:
+            float(dart_default)
+            return dart_default
+        except ValueError:
+            pass
+
+        # String literals: keep as-is if they look like Python strings
+        if (dart_default.startswith('"') and dart_default.endswith('"')) or \
+           (dart_default.startswith("'") and dart_default.endswith("'")):
+            return dart_default
+
+        # Unknown complex expression → None
+        return "None"

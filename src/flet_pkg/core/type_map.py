@@ -24,6 +24,8 @@ _TYPE_MAP: dict[str, str] = {
     "DateTime": "str",
     "Uint8List": "bytes",
     "BigInt": "int",
+    "Uri": "str",
+    "Rect": "dict",
 }
 
 # Regex to extract generic type parameters: e.g. List<String> -> ("List", "String")

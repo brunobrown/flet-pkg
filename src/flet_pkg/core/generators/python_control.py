@@ -49,6 +49,8 @@ class PythonControlGenerator(CodeGenerator):
         type_imports.append(plan.error_event_class or f"{plan.control_name}ErrorEvent")
         for enum in plan.enums:
             type_imports.append(enum.python_name)
+        for stub in plan.stub_data_classes:
+            type_imports.append(stub.python_name)
         if type_imports:
             lines.append(f"from {plan.package_name}.types import (")
             for imp in sorted(set(type_imports)):

@@ -82,11 +82,31 @@ UI_CLASS_SUFFIXES = (
     "Internal",
     "Instance",
     "Plugins",
+    "Plugin",
     "ServiceAPIPrivateImpl",
 )
 
+# Parent classes that indicate a platform implementation (not a public API).
+# Classes extending these are skipped entirely.
+PLATFORM_IMPL_BASES = (
+    "Platform",
+    "PlatformInterface",
+    "MethodChannelPlatform",
+)
+
+# Parent classes that indicate a Flutter widget (not a service API).
+WIDGET_BASES = (
+    "StatelessWidget",
+    "StatefulWidget",
+    "InheritedWidget",
+    "RenderObjectWidget",
+    "LeafRenderObjectWidget",
+    "SingleChildRenderObjectWidget",
+    "MultiChildRenderObjectWidget",
+)
+
 # Classes ending with these are parsed into helper_classes (not skipped entirely).
-# Used for event field extraction and type resolution.
+# Used for event field extraction, type resolution, and config data classes.
 HELPER_CLASS_SUFFIXES = (
     "Event",
     "Data",
@@ -96,6 +116,11 @@ HELPER_CLASS_SUFFIXES = (
     "ClickResult",
     "Button",
     "Layout",
+    "Configuration",
+    "Config",
+    "Options",
+    "Params",
+    "Info",
 )
 
 # Parent classes that indicate a data/serialization class (not an API).
@@ -128,7 +153,17 @@ def _should_skip_class(class_name: str, docstring: str = "", parent_class: str =
         or class_name.endswith(UI_CLASS_SUFFIXES)
         or "nodoc" in docstring.lower()
         or "internal" in docstring.lower()
+        or _is_platform_impl(parent_class)
+        or parent_class in WIDGET_BASES
     )
+
+
+def _is_platform_impl(parent_class: str) -> bool:
+    """Check if a parent class indicates a platform implementation."""
+    if not parent_class:
+        return False
+    # Direct match or ends with a known platform base suffix
+    return parent_class.endswith(PLATFORM_IMPL_BASES)
 
 
 def _is_helper_class(class_name: str, parent_class: str = "") -> bool:
@@ -145,12 +180,15 @@ def _is_helper_class(class_name: str, parent_class: str = "") -> bool:
     return False
 
 
-def _should_skip_method(method_name: str, docstring: str = "") -> bool:
+def _should_skip_method(
+    method_name: str, docstring: str = "", return_type: str = "",
+) -> bool:
     return (
         method_name in UI_METHODS
         or method_name in LIFECYCLE_METHODS
         or method_name.startswith("_")
-        or method_name.startswith("on")
+        # Skip on* methods UNLESS they are Stream getters (event sources)
+        or (method_name.startswith("on") and not return_type.startswith("Stream"))
         or "nodoc" in docstring.lower()
         or not method_name.isidentifier()
         or method_name[0].isupper()
@@ -162,6 +200,27 @@ def _is_inside_comment(text: str, pos: int) -> bool:
     line_start = text.rfind("\n", 0, pos) + 1
     line_prefix = text[line_start:pos]
     return "//" in line_prefix
+
+
+def _is_inside_string(text: str, pos: int) -> bool:
+    """Check if *pos* falls inside a string literal (single or double quoted)."""
+    # Scan from the last newline to pos, counting unescaped quotes
+    line_start = text.rfind("\n", 0, pos) + 1
+    line = text[line_start:pos]
+    in_single = False
+    in_double = False
+    i = 0
+    while i < len(line):
+        c = line[i]
+        if c == "\\" and (in_single or in_double):
+            i += 2
+            continue
+        if c == "'" and not in_double:
+            in_single = not in_single
+        elif c == '"' and not in_single:
+            in_double = not in_double
+        i += 1
+    return in_single or in_double
 
 
 def _extract_balanced_parens(text: str, open_pos: int) -> str | None:
@@ -380,6 +439,13 @@ def _parse_params_string(params_raw: str) -> list[DartParam]:
         if nesting == 0:
             if char == "{":
                 is_named = True
+                # Retroactively mark trailing whitespace as named
+                # so that spaces between `,` and `{` don't misclassify
+                # the next parameter as positional.
+                i = len(clean) - 1
+                while i >= 0 and clean[i][0].isspace():
+                    clean[i] = (clean[i][0], True, clean[i][2])
+                    i -= 1
                 continue
             if char == "}":
                 is_named = False
@@ -493,9 +559,10 @@ def _parse_enums(content: str) -> list[DartEnum]:
         )
         docstring = _clean_docstring(doc_match) if doc_match else ""
 
-        # Parse values: strip comments and annotations
+        # Parse values: strip doc comments (/// lines) before splitting
+        cleaned_body = re.sub(r"[ \t]*///[^\n]*", "", body)
         values = []
-        for line in body.split(","):
+        for line in cleaned_body.split(","):
             val = line.strip()
             val = re.sub(r"//.*$", "", val).strip()
             val = re.sub(r";.*$", "", val).strip()
@@ -563,7 +630,7 @@ def _parse_class_methods(
 
         if method_name in seen:
             continue
-        if skip_filter and _should_skip_method(method_name, method_doc):
+        if skip_filter and _should_skip_method(method_name, method_doc, return_type):
             continue
         seen.add(method_name)
 
@@ -590,7 +657,7 @@ def _parse_class_methods(
     getter_matches = re.finditer(
         r"(?:@[^\n]*\n)*"
         r"(static\s+)?"
-        r"(Future<.*?>|String|bool|int|double|dynamic|Map<.*?>|List<.*?>|\w+\??)\s+"
+        r"(Future<.*?>|Stream<.*?>|String|bool|int|double|dynamic|Map<.*?>|List<.*?>|\w+\??)\s+"
         r"get\s+(\w+)\s*(?:\{|=>)",
         class_block,
     )
@@ -612,7 +679,7 @@ def _parse_class_methods(
         )
         method_doc = _clean_docstring(method_doc_match) if method_doc_match else ""
 
-        if skip_filter and _should_skip_method(getter_name, method_doc):
+        if skip_filter and _should_skip_method(getter_name, method_doc, return_type):
             continue
         seen.add(getter_name)
 
@@ -670,7 +737,8 @@ def _parse_class_methods(
 
     if skip_filter:
         methods = [
-            m for m in methods if not _should_skip_method(m.name, m.docstring or "")
+            m for m in methods
+            if not _should_skip_method(m.name, m.docstring or "", m.return_type)
         ]
 
     return methods
@@ -706,6 +774,135 @@ def _parse_reexports(lib_dir: Path) -> dict[str, str]:
 
 
 # ---------------------------------------------------------------------------
+# Top-level function parsing
+# ---------------------------------------------------------------------------
+
+
+def _parse_top_level_functions(
+    content: str, source_file: str = "",
+) -> list[DartMethod]:
+    """Parse top-level functions (not inside any class) from Dart source.
+
+    Finds function declarations at the top level of the file and extracts
+    their signatures.  Skips private functions (starting with ``_``),
+    ``main()``, and functions inside class bodies.
+    """
+    # Skip files that are clearly internal implementation
+    if source_file:
+        stem = source_file.rsplit("/", maxsplit=1)[-1].replace(".dart", "")
+        if any(
+            stem.endswith(s)
+            for s in ("_conversion", "_internal", "_stub", "_test")
+        ):
+            return []
+    # First, find the spans of all class/enum bodies so we can exclude them
+    class_spans: list[tuple[int, int]] = []
+    for m in re.finditer(
+        r"(?:abstract\s+)?(?:class|enum|mixin|extension)\s+\w+[^{]*\{",
+        content,
+    ):
+        block = _extract_code_block(content[m.end() - 1 :])
+        if block is not None:
+            class_spans.append((m.start(), m.end() + len(block)))
+
+    def _is_inside_class(pos: int) -> bool:
+        return any(start <= pos < end for start, end in class_spans)
+
+    # Match top-level function declarations
+    func_re = re.compile(
+        r"(?:@[^\n]*\n)*"
+        r"(static\s+)?"
+        r"(Future<.*?>|Future|void|String|bool|int|double|dynamic|"
+        r"Map<.*?>|List<.*?>|Set<.*?>|\w+(?:\?)?)\s+"
+        r"(\w+)"
+        r"\s*\(",
+    )
+
+    functions: list[DartMethod] = []
+    seen: set[str] = set()
+
+    # Known valid Dart return types (lowercase) — catches false positives
+    # from matches inside string literals.
+    _VALID_RETURN_TYPES = {
+        "void", "int", "double", "bool", "dynamic", "num", "var",
+    }
+
+    for m in func_re.finditer(content):
+        if _is_inside_class(m.start()):
+            continue
+        if _is_inside_comment(content, m.start()):
+            continue
+        if _is_inside_string(content, m.start()):
+            continue
+
+        # Check for @Deprecated or @visibleForTesting annotations
+        annotation_text = m.group(0)
+        if re.search(r"@[Dd]eprecated|@visibleForTesting", annotation_text):
+            continue
+
+        return_type = m.group(2)
+        func_name = m.group(3)
+
+        # Skip private, main, and non-identifier names
+        if func_name.startswith("_") or func_name == "main":
+            continue
+        if not func_name.isidentifier() or func_name[0].isupper():
+            continue
+        if func_name in seen:
+            continue
+        # Skip known non-function patterns (import, export, etc.)
+        if return_type in ("import", "export", "part", "library", "typedef"):
+            continue
+        # Validate return type: must be a known type or start with uppercase
+        if (
+            return_type not in _VALID_RETURN_TYPES
+            and not return_type[0].isupper()
+            and not return_type.startswith("Future")
+            and not return_type.startswith("Stream")
+            and not return_type.startswith("Map")
+            and not return_type.startswith("List")
+            and not return_type.startswith("Set")
+        ):
+            continue
+
+        # Extract balanced params
+        open_pos = m.end() - 1
+        params_raw = _extract_balanced_parens(content, open_pos)
+        if params_raw is None:
+            continue
+
+        # Docstring
+        doc_match = re.search(
+            r"(///[^\n]*(?:\n\s*///[^\n]*)*|/\*\*.*?\*/)\s*$",
+            content[: m.start()],
+            re.DOTALL,
+        )
+        func_doc = _clean_docstring(doc_match) if doc_match else ""
+
+        if _should_skip_method(func_name, func_doc):
+            continue
+
+        seen.add(func_name)
+        parsed_params = _parse_params_string(params_raw)
+        is_async = return_type.startswith("Future")
+
+        functions.append(
+            DartMethod(
+                name=func_name,
+                return_type=return_type,
+                params=parsed_params,
+                docstring=func_doc,
+                is_static=False,
+                is_getter=False,
+                is_setter=False,
+                is_async=is_async,
+            )
+        )
+
+    return functions
+
+
+# ---------------------------------------------------------------------------
 # Main parse functions
 # ---------------------------------------------------------------------------
 
@@ -728,6 +925,7 @@ def parse_dart_package_api(package_path: Path, strict: bool = False) -> DartPack
     all_enums: list[DartEnum] = []
     all_helpers: list[DartClass] = []
     all_typedefs: dict[str, str] = {}
+    all_top_level_functions: list[DartMethod] = []
 
     for dart_file in lib_dir.rglob("*.dart"):
         content = dart_file.read_text(encoding="utf-8")
@@ -738,6 +936,11 @@ def parse_dart_package_api(package_path: Path, strict: bool = False) -> DartPack
 
         # Parse enums
         all_enums.extend(_parse_enums(content))
+
+        # Parse top-level functions (not inside any class)
+        all_top_level_functions.extend(
+            _parse_top_level_functions(content, relative_path)
+        )
 
         # Parse classes
         class_matches = re.finditer(
@@ -753,6 +956,11 @@ def parse_dart_package_api(package_path: Path, strict: bool = False) -> DartPack
         for match in class_matches:
             class_name = match.group(1)
             parent_class = match.group(2) or ""
+
+            # Check for @Deprecated annotation on the class
+            annotation_text = match.group(0)
+            if re.search(r"@[Dd]eprecated", annotation_text):
+                continue
 
             doc_match = re.search(
                 r"(///.*?$|/\*\*(.*?)\*/)",
@@ -807,6 +1015,7 @@ def parse_dart_package_api(package_path: Path, strict: bool = False) -> DartPack
         helper_classes=all_helpers,
         typedefs=all_typedefs,
         reexported_types=reexported,
+        top_level_functions=all_top_level_functions,
     )
 
 

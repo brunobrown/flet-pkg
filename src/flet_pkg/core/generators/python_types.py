@@ -14,8 +14,8 @@ class PythonTypesGenerator(CodeGenerator):
     """Generates types.py with enums and event dataclasses."""
 
     def generate(self, plan: GenerationPlan) -> dict[str, str]:
-        if not plan.enums and not plan.events:
-            return {}
+        # Always generate types.py — the error event class is always
+        # imported by the main control file.
 
         lines: list[str] = []
 
@@ -71,6 +71,23 @@ class PythonTypesGenerator(CodeGenerator):
                     lines.append(f"    {field_name}: Optional[{field_type}] = None")
                 field_desc = field_name.replace("_", " ").capitalize()
                 lines.append(f'    """{field_desc}."""')
+                lines.append("")
+
+        # Stub data classes (re-exported types from platform_interface)
+        for stub in plan.stub_data_classes:
+            lines.append("")
+            lines.append("@dataclass")
+            lines.append(f"class {stub.python_name}:")
+            if stub.docstring:
+                lines.append(f'    """{stub.docstring}"""')
+            else:
+                lines.append(f'    """{stub.python_name} data class."""')
+            lines.append("")
+            for field_name, field_type in stub.fields:
+                if field_type == "dict":
+                    lines.append(f"    {field_name}: dict = None")
+                else:
+                    lines.append(f"    {field_name}: Optional[{field_type}] = None")
                 lines.append("")
 
         # Error event (always generated)

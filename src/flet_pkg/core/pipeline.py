@@ -101,18 +101,19 @@ class GenerationPipeline:
             n_classes = len(api.classes)
             n_enums = len(api.enums)
             n_helpers = len(api.helper_classes)
-            console.print(
-                f"  [success]Parsed {n_classes} classes, {n_enums} enums, "
-                f"{n_helpers} helper types[/success]"
-            )
+            n_funcs = len(api.top_level_functions)
+            parts = [f"{n_classes} classes", f"{n_enums} enums", f"{n_helpers} helper types"]
+            if n_funcs:
+                parts.append(f"{n_funcs} top-level functions")
+            console.print(f"  [success]Parsed {', '.join(parts)}[/success]")
         except Exception as e:
             result.warnings.append(f"Parse failed: {e}")
             console.print(f"  [warning]Parse failed: {e}[/warning]")
             return result
 
-        if not api.classes:
-            result.warnings.append("No public classes found in package.")
-            console.print("  [warning]No public classes found.[/warning]")
+        if not api.classes and not api.top_level_functions:
+            result.warnings.append("No public classes or functions found in package.")
+            console.print("  [warning]No public classes or functions found.[/warning]")
             return result
 
         # Step 3: Analyze
@@ -128,6 +129,14 @@ class GenerationPipeline:
             # Set control_name_snake from the template context
             plan.control_name_snake = control_name_snake
             result.plan = plan
+
+            # Resolve re-exported types from platform_interface packages
+            if api.reexported_types:
+                try:
+                    self.analyzer.resolve_platform_types(api, plan)
+                except Exception:
+                    pass  # Non-fatal: stubs remain as fallback
+
             n_methods = len(plan.main_methods) + sum(
                 len(s.methods) for s in plan.sub_modules
             )

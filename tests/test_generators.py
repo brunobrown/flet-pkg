@@ -201,11 +201,13 @@ class TestPythonTypesGenerator:
         content = files["types.py"]
         assert "class OneSignalErrorEvent(ft.Event" in content
 
-    def test_empty_plan(self):
+    def test_empty_plan_still_generates_error_event(self):
         plan = GenerationPlan(control_name="X", package_name="x")
         gen = PythonTypesGenerator()
         files = gen.generate(plan)
-        assert files == {}
+        # types.py is always generated (error event class is always needed)
+        assert "types.py" in files
+        assert "XErrorEvent" in files["types.py"]
 
 
 class TestPythonInitGenerator:
