@@ -56,6 +56,9 @@ class PackageAnalyzer:
         base_class = "ft.Service" if extension_type == "service" else "ft.LayoutControl"
         control_name_lower = control_name.lower()
 
+        # Build set of known re-exported type names for type sanitization
+        self._known_types = frozenset(api.reexported_types.keys())
+
         # Detect the main SDK class (the one matching the control name)
         dart_main_class = self._detect_main_class(api, control_name)
 
@@ -73,12 +76,16 @@ class PackageAnalyzer:
         namespace_classes: dict[str, list[DartClass]] = {}
         main_classes: list[DartClass] = []
 
-        for cls in api.classes:
-            ns = self._detect_namespace(cls, control_name, control_name_lower)
-            if ns:
-                namespace_classes.setdefault(ns, []).append(cls)
-            else:
-                main_classes.append(cls)
+        # Single-class packages: the only class IS the main class, no sub-modules
+        if len(api.classes) == 1:
+            main_classes = api.classes[:]
+        else:
+            for cls in api.classes:
+                ns = self._detect_namespace(cls, control_name, control_name_lower)
+                if ns:
+                    namespace_classes.setdefault(ns, []).append(cls)
+                else:
+                    main_classes.append(cls)
 
         # Infer properties from initialize() method on main class
         for cls in main_classes:
@@ -195,6 +202,11 @@ class PackageAnalyzer:
         if cls_lower.startswith(control_name_lower):
             suffix = cls.name[len(control_name) :]
             if suffix:
+                # Only treat as namespace if suffix starts on a PascalCase
+                # boundary (uppercase). "LocalAuthentication" with control
+                # "LocalAuth" → suffix "entication" (lowercase) = mid-word split.
+                if not suffix[0].isupper():
+                    return None
                 return camel_to_snake(suffix)
 
         # Check if the class file suggests a namespace
@@ -224,7 +236,9 @@ class PackageAnalyzer:
         control_len = len(control_name)
         if cls_name.lower().startswith(control_name.lower()) and len(cls_name) > control_len:
             suffix = cls_name[control_len:]
-            return f"{dart_main_class}.{suffix}"
+            # Only use suffix if it starts on a PascalCase boundary
+            if suffix[0].isupper():
+                return f"{dart_main_class}.{suffix}"
         return dart_main_class
 
     # ------------------------------------------------------------------
@@ -632,13 +646,13 @@ class PackageAnalyzer:
 
         python_return, _dart_is_async = map_return_type(method.return_type)
         # Sanitize return type: replace unknown Dart classes with dict | None
-        python_return = _sanitize_python_type(python_return)
+        python_return = _sanitize_python_type(python_return, self._known_types)
 
         params: list[ParamPlan] = []
         for p in method.params:
             python_type = map_dart_type(p.dart_type)
             # Sanitize: replace unknown Dart classes with dict | None
-            python_type = _sanitize_python_type(python_type)
+            python_type = _sanitize_python_type(python_type, self._known_types)
             raw_name = camel_to_snake(p.name) if p.name != p.name.lower() else p.name
             # Normalize param name: strip namespace words, simplify redundant names
             param_name = _normalize_param_name(raw_name, python_name, dart_prefix)
@@ -1105,14 +1119,15 @@ def _normalize_method_name(
             return f"{dart_prefix}_{new_name}"
         return new_name
 
-    # Bare getter: no params, non-void return, no existing prefix → add "get_" or "is_"
+    # Verb prefixes that already convey meaning — don't add get_/is_ on top
+    _VERB_PREFIXES = ("get_", "is_", "are_", "can_", "has_", "should_", "does_", "will_", "was_")
+
+    # Bare getter: no params, non-void return, no existing verb prefix → add "get_" or "is_"
     if (
         method.is_getter
         and not method.params
         and method.return_type not in ("void", "Future<void>")
-        and not python_name.startswith("get_")
-        and not python_name.startswith("is_")
-        and not python_name.startswith("are_")
+        and not any(python_name.startswith(vp) for vp in _VERB_PREFIXES)
     ):
         is_bool = method.return_type in ("bool", "bool?", "Future<bool>", "Future<bool?>")
         prefix_word = "is_" if is_bool else "get_"
@@ -1162,12 +1177,18 @@ _KNOWN_PYTHON_TYPES = frozenset({
 })
 
 
-def _sanitize_python_type(python_type: str) -> str:
+def _sanitize_python_type(
+    python_type: str,
+    known_types: frozenset[str] = frozenset(),
+) -> str:
     """Replace unknown Dart class types with ``dict | None``.
 
     Types like ``LiveActivitySetupOptions`` that pass through the
     type_map unchanged are replaced with a safe fallback, since
     they won't exist in the generated Python code.
+
+    *known_types* contains re-exported type names from the package
+    barrel file that should be preserved (e.g. ``BiometricType``).
     """
     # Strip nullable suffix for checking
     base = python_type.rstrip(" |None").strip()
@@ -1183,6 +1204,10 @@ def _sanitize_python_type(python_type: str) -> str:
 
     # Types starting with OS are enum references — keep them
     if base.startswith("OS") or base.startswith("os"):
+        return python_type
+
+    # Re-exported public API types — keep them
+    if base in known_types:
         return python_type
 
     # If it looks like a Dart class name (UpperCase), replace with dict

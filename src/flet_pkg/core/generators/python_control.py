@@ -212,7 +212,7 @@ class PythonControlGenerator(CodeGenerator):
             if p.is_optional:
                 if "None" not in type_hint:
                     type_hint = f"{type_hint} | None"
-                default = p.default if p.default else "None"
+                default = self._py_default(p.default)
                 sig_parts.append(f"{p.python_name}: {type_hint} = {default}")
             else:
                 sig_parts.append(f"{p.python_name}: {type_hint}")

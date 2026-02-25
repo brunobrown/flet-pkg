@@ -69,6 +69,8 @@ class DartPackageAPI:
     enums: list[DartEnum] = field(default_factory=list)
     helper_classes: list[DartClass] = field(default_factory=list)
     typedefs: dict[str, str] = field(default_factory=dict)
+    reexported_types: dict[str, str] = field(default_factory=dict)
+    """Mapping of type name → source package for re-exported public API types."""
 
 
 # ---------------------------------------------------------------------------

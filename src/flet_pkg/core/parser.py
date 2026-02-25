@@ -164,6 +164,54 @@ def _is_inside_comment(text: str, pos: int) -> bool:
     return "//" in line_prefix
 
 
+def _extract_balanced_parens(text: str, open_pos: int) -> str | None:
+    """Extract content between balanced parentheses starting at *open_pos*.
+
+    ``text[open_pos]`` must be ``(``.  Returns the text between the outer
+    parens (exclusive) or ``None`` if unbalanced.
+    """
+    if open_pos >= len(text) or text[open_pos] != "(":
+        return None
+    depth = 1
+    i = open_pos + 1
+    length = len(text)
+    while i < length:
+        c = text[i]
+        # Skip string literals (single and double quotes)
+        if c in ("'", '"'):
+            quote = c
+            i += 1
+            while i < length and text[i] != quote:
+                if text[i] == "\\":
+                    i += 1  # skip escaped char
+                i += 1
+            i += 1  # skip closing quote
+            continue
+        # Skip line comments
+        if c == "/" and i + 1 < length and text[i + 1] == "/":
+            i = text.find("\n", i)
+            if i == -1:
+                break
+            i += 1
+            continue
+        # Skip block comments
+        if c == "/" and i + 1 < length and text[i + 1] == "*":
+            i = text.find("*/", i + 2)
+            if i == -1:
+                break
+            i += 2
+            continue
+        # Track nesting for all bracket types
+        if c in "(<[":
+            depth += 1
+        elif c in ")>]":
+            depth -= 1
+            if depth == 0:
+                return text[open_pos + 1 : i]
+        i += 1
+    return None
+
+
 def _is_callback_param(param: DartParam) -> bool:
     """Check if a parameter is a callback/function type."""
     t = param.dart_type
@@ -322,22 +370,31 @@ def _parse_params_string(params_raw: str) -> list[DartParam]:
 
     # Detect named params section: { ... }
     # and positional params section: [ ... ]
+    # Track nesting depth so that brackets inside default values (e.g.,
+    # `const <T>[...]` or `{key: value}`) don't corrupt section markers.
     is_named = False
     is_optional = False
+    nesting = 0  # depth inside (), <>, or [] within defaults
     clean = []
     for char in params_raw:
-        if char == "{":
-            is_named = True
-            continue
-        if char == "}":
-            is_named = False
-            continue
-        if char == "[":
-            is_optional = True
-            continue
-        if char == "]":
-            is_optional = False
-            continue
+        if nesting == 0:
+            if char == "{":
+                is_named = True
+                continue
+            if char == "}":
+                is_named = False
+                continue
+            if char == "[" and not is_named:
+                is_optional = True
+                continue
+            if char == "]" and is_optional and not is_named:
+                is_optional = False
+                continue
+        # Track nesting for all bracket types inside defaults
+        if char in "(<[":
+            nesting += 1
+        elif char in ")>]":
+            nesting -= 1
         clean.append((char, is_named, is_optional))
 
     # Rebuild with markers
@@ -367,9 +424,9 @@ def _parse_params_string(params_raw: str) -> list[DartParam]:
 def _count_depth(chars: list[str]) -> int:
     depth = 0
     for c in chars:
-        if c in "(<":
+        if c in "(<[":
             depth += 1
-        elif c in ")>":
+        elif c in ")>]":
             depth -= 1
     return depth
 
@@ -466,15 +523,16 @@ def _parse_class_methods(
     seen: set[str] = set()
 
     # Parse methods with parentheses: `Type name(params)` or `Type get/set name(params)`
-    method_matches = re.finditer(
+    # Match up to the opening paren, then use balanced extraction for params.
+    method_sig_re = re.compile(
         r"(?:@[^\n]*\n)*"
         r"(static\s+)?"
         r"(Future<.*?>|Future|void|String|bool|int|double|dynamic|"
         r"Map<.*?>|List<.*?>|Set<.*?>|\w+(?:\?)?)\s+"
         r"(get\s+|set\s+)?(\w+)"
-        r"\s*\(([^)]*)\)",
-        class_block,
+        r"\s*\(",
     )
+    method_matches = method_sig_re.finditer(class_block)
 
     for m in method_matches:
         # Skip matches that fall inside a comment line
@@ -487,7 +545,12 @@ def _parse_class_methods(
         is_getter = accessor is not None and accessor.strip() == "get"
         is_setter = accessor is not None and accessor.strip() == "set"
         method_name = m.group(4)
-        params_raw = m.group(5)
+
+        # Extract balanced parameter text from opening paren
+        open_pos = m.end() - 1  # position of the '('
+        params_raw = _extract_balanced_parens(class_block, open_pos)
+        if params_raw is None:
+            continue
 
         is_async = return_type.startswith("Future")
 
@@ -614,6 +677,35 @@ def _parse_class_methods(
 
 
 # ---------------------------------------------------------------------------
+# Re-export parsing
+# ---------------------------------------------------------------------------
+
+
+def _parse_reexports(lib_dir: Path) -> dict[str, str]:
+    """Parse barrel files to find re-exported public API type names.
+
+    Scans top-level ``export`` directives in ``lib/*.dart`` for
+    ``show`` clauses and returns a mapping of symbol name → source package.
+    """
+    reexports: dict[str, str] = {}
+    # Only check top-level dart files in lib/ (barrel files)
+    for dart_file in lib_dir.glob("*.dart"):
+        content = dart_file.read_text(encoding="utf-8")
+        for m in re.finditer(
+            r"export\s+['\"]package:([^'\"]+)['\"]"
+            r"\s+show\s+([^;]+);",
+            content,
+        ):
+            package_path_str = m.group(1)
+            symbols = [s.strip() for s in m.group(2).split(",")]
+            package_name = package_path_str.split("/")[0]
+            for sym in symbols:
+                if sym and sym[0].isupper():
+                    reexports[sym] = package_name
+    return reexports
+
+
+# ---------------------------------------------------------------------------
 # Main parse functions
 # ---------------------------------------------------------------------------
 
@@ -706,11 +798,15 @@ def parse_dart_package_api(package_path: Path, strict: bool = False) -> DartPack
                     )
                 )
 
+    # Parse re-exported types from barrel files
+    reexported = _parse_reexports(lib_dir)
+
     return DartPackageAPI(
         classes=all_classes,
         enums=all_enums,
         helper_classes=all_helpers,
         typedefs=all_typedefs,
+        reexported_types=reexported,
     )
 
 

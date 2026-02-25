@@ -52,3 +52,15 @@ class CodeGenerator(ABC):
     def _imports(*modules: str) -> str:
         """Generate sorted import lines."""
         return "\n".join(sorted(f"import {m}" for m in modules))
+
+    @staticmethod
+    def _py_default(dart_default: str | None) -> str:
+        """Convert a Dart default value to a Python literal."""
+        if not dart_default:
+            return "None"
+        _DART_TO_PYTHON = {
+            "true": "True",
+            "false": "False",
+            "null": "None",
+        }
+        return _DART_TO_PYTHON.get(dart_default, dart_default)
