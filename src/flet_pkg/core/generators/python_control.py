@@ -112,8 +112,9 @@ class PythonControlGenerator(CodeGenerator):
             lines.append("")
 
         # Error event handler
+        error_cls = plan.error_event_class or f"{plan.control_name}ErrorEvent"
         lines.append(
-            f"    on_error: Optional[ft.EventHandler[{plan.control_name}ErrorEvent]] = None"
+            f"    on_error: Optional[ft.EventHandler[{error_cls}]] = None"
         )
         lines.append('    """Called when an error occurs in the SDK."""')
         lines.append("")

@@ -92,7 +92,7 @@ class PackageAnalyzer:
             self._process_main_class(cls, plan, control_name_lower, dart_main_class, api)
 
         # Detect sub-object namespaces (e.g., User.pushSubscription → fold into user)
-        self._fold_sub_objects(api, namespace_classes, control_name)
+        self._fold_sub_objects(api, namespace_classes, control_name, plan)
 
         # Process namespace classes into sub-modules
         for ns_name, classes in namespace_classes.items():
@@ -264,6 +264,7 @@ class PackageAnalyzer:
         api: DartPackageAPI,
         namespace_classes: dict[str, list[DartClass]],
         control_name: str,
+        plan: GenerationPlan | None = None,
     ) -> None:
         """Fold sub-object namespaces into their parent namespace.
 
@@ -271,6 +272,9 @@ class PackageAnalyzer:
         is accessed as a getter on another namespace class (e.g.,
         ``OneSignalUser.pushSubscription``).  When found, the sub-object's
         methods are renamed with a short prefix and merged into the parent.
+
+        Events from folded classes are extracted before listener methods
+        are removed, ensuring they appear on the main control.
         """
         # Build class name → namespace mapping
         class_to_ns: dict[str, str] = {}
@@ -297,10 +301,35 @@ class PackageAnalyzer:
                     short_prefix = getter_snake.split("_")[0]
                     folds.append((child_ns, parent_ns, short_prefix))
 
-        # Execute folds: rename child methods with prefix and merge
+        # Execute folds: extract events first, then rename and merge
         for child_ns, parent_ns, prefix in folds:
             if child_ns not in namespace_classes or parent_ns not in namespace_classes:
                 continue
+
+            # Extract events from child classes BEFORE removing listener methods
+            if plan:
+                for cls in namespace_classes[child_ns]:
+                    for method in cls.methods:
+                        event = self._detect_event(
+                            method, control_name, api,
+                            plan.dart_main_class, cls.name,
+                        )
+                        if event and not any(
+                            e.python_attr_name == event.python_attr_name
+                            for e in plan.events
+                        ):
+                            plan.events.append(event)
+
+            # Find the full getter name for richer naming (e.g., "push_subscription")
+            full_getter_snake = ""
+            for cls_check in api.classes:
+                if class_to_ns.get(cls_check.name) != parent_ns:
+                    continue
+                for m in cls_check.methods:
+                    if m.is_getter and class_to_ns.get(m.return_type.rstrip("?")) == child_ns:
+                        full_getter_snake = camel_to_snake(m.name)
+                        break
+
             for cls in namespace_classes[child_ns]:
                 # Filter out listener/observer methods before renaming
                 cls.methods = [
@@ -308,9 +337,31 @@ class PackageAnalyzer:
                     if not re.match(r"add\w*(Listener|Observer|Handler)$", m.name)
                     and not re.match(r"remove\w*(Listener|Observer|Handler)$", m.name)
                 ]
-                # Prefix remaining method names: "optIn" → "PushOptIn"
+                # Rename methods using intelligent prefix strategy
                 for method in cls.methods:
-                    if not method.name.lower().startswith(prefix):
+                    if method.name.lower().startswith(prefix):
+                        continue  # Already has prefix
+                    if method.is_getter and not method.params:
+                        # Getters use full name: id → GetPushSubscriptionId
+                        cap_full = "".join(
+                            w.capitalize()
+                            for w in full_getter_snake.split("_")
+                        ) if full_getter_snake else prefix.capitalize()
+                        method.name = (
+                            "Get" + cap_full
+                            + method.name[0].upper() + method.name[1:]
+                        )
+                    elif (
+                        method.return_type in ("void", "Future<void>")
+                        and not method.params
+                    ):
+                        # Void no-param actions: optIn → OptInPush (verb first)
+                        method.name = (
+                            method.name
+                            + prefix[0].upper() + prefix[1:]
+                        )
+                    else:
+                        # Default: prefix normally: "foo" → "PushFoo"
                         method.name = (
                             prefix.capitalize()
                             + method.name[0].upper()
@@ -382,7 +433,12 @@ class PackageAnalyzer:
                 elif method.name.startswith("set") and param.dart_type in enum_names:
                     raw_name = method.name[3:]
                     prop_name = camel_to_snake(raw_name)
-                    prop_type = "int | None"
+                    # If method name contains "Alert" or "Visual", prefer
+                    # "visual_alert_level" to match common SDK conventions
+                    if "alert" in raw_name.lower() and "visual" not in prop_name:
+                        prop_name = f"visual_{prop_name}"
+                    enum_type = param.dart_type
+                    prop_type = f"Optional[{enum_type}]"
                     prop_default = "None"
                     prop_doc = method.docstring or f"The {prop_name.replace('_', ' ')}."
                     sdk_accessor = self._compute_sdk_accessor(
@@ -391,7 +447,7 @@ class PackageAnalyzer:
                     dart_pre_init_call = (
                         f"if ({{var}} != null) {{ "
                         f"{sdk_accessor}.{method.name}"
-                        f"({param.dart_type}.values[{{var}}]); }}"
+                        f"({enum_type}.values[{{var}}.value]); }}"
                     )
 
                 if prop_name and not any(
@@ -563,25 +619,32 @@ class PackageAnalyzer:
         """Convert a DartMethod to a MethodPlan."""
         python_name = camel_to_snake(method.name)
 
-        # Use abbreviation for the prefix in dart method keys
-        abbreviated_prefix = _abbreviate_namespace(dart_prefix) if dart_prefix else ""
-
-        if abbreviated_prefix:
-            # Deduplicate: if method name starts with singular form of namespace,
-            # strip it. E.g., "remove_notification" in "notifications" → "remove"
-            clean_name = _deduplicate_method_name(python_name, dart_prefix)
-            dart_method_name = f"{abbreviated_prefix}_{clean_name}"
+        # Invoke key = "{module_name}_{python_method_name}" — no abbreviation
+        if dart_prefix:
+            dart_method_name = f"{dart_prefix}_{python_name}"
         else:
             dart_method_name = python_name
 
+        # Normalize common naming patterns for Pythonic API
+        python_name, dart_method_name = _normalize_method_name(
+            python_name, dart_method_name, method, dart_prefix,
+        )
+
         python_return, _dart_is_async = map_return_type(method.return_type)
+        # Sanitize return type: replace unknown Dart classes with dict | None
+        python_return = _sanitize_python_type(python_return)
 
         params: list[ParamPlan] = []
         for p in method.params:
             python_type = map_dart_type(p.dart_type)
+            # Sanitize: replace unknown Dart classes with dict | None
+            python_type = _sanitize_python_type(python_type)
+            raw_name = camel_to_snake(p.name) if p.name != p.name.lower() else p.name
+            # Normalize param name: strip namespace words, simplify redundant names
+            param_name = _normalize_param_name(raw_name, python_name, dart_prefix)
             params.append(
                 ParamPlan(
-                    python_name=camel_to_snake(p.name) if p.name != p.name.lower() else p.name,
+                    python_name=param_name,
                     python_type=python_type,
                     dart_name=p.name,
                     dart_type=p.dart_type,
@@ -637,8 +700,17 @@ class PackageAnalyzer:
             event_core = self._derive_event_core_from_context(
                 method, source_class_name, control_name, api
             )
+        else:
+            # Enrich event_core from typedef name if it provides more info
+            # E.g., method "addPermissionObserver" → core "Permission"
+            # but typedef "OnNotificationPermissionChangeObserver" → "PermissionChange"
+            event_core = self._enrich_event_core(event_core, method, api)
 
         snake = camel_to_snake(event_core) if event_core else "change"
+
+        # Shorten verbose event names:
+        # "foreground_will_display" → "foreground" (will_display is implied)
+        snake = _shorten_event_name(snake)
 
         # Deduplicate: if snake already starts with the namespace prefix,
         # strip it to avoid "on_user_user_change" → "on_user_change".
@@ -670,6 +742,41 @@ class PackageAnalyzer:
             dart_listener_method=name,
             dart_sdk_accessor=sdk_accessor,
         )
+
+    def _enrich_event_core(
+        self,
+        event_core: str,
+        method: DartMethod,
+        api: DartPackageAPI | None,
+    ) -> str:
+        """Enrich event_core from typedef/callback type name.
+
+        If the method name gives a short core like "Permission", the typedef
+        name ``OnNotificationPermissionChangeObserver`` provides the richer
+        "PermissionChange".
+        """
+        if not api or not method.params:
+            return event_core
+
+        cb_type = method.params[0].dart_type
+        # Look for On{Prefix}{EventCore}{Extra}(Observer|Listener|Handler) pattern
+        # The non-capturing group MUST match (required prefix between On and event_core)
+        # This prevents matching OnClickInAppMessageListener with event_core="Click"
+        # but DOES match OnNotificationPermissionChangeObserver with event_core="Permission"
+        m = re.match(
+            r"On(?:[A-Z]\w+?)(" + re.escape(event_core) + r"\w*?)"
+            r"(Observer|Listener|Handler|Change)$",
+            cb_type,
+        )
+        if m:
+            enriched = m.group(1)
+            suffix = m.group(2)
+            if suffix == "Change" and not enriched.endswith("Change"):
+                enriched += "Change"
+            if len(enriched) > len(event_core):
+                return enriched
+
+        return event_core
 
     def _derive_event_core_from_context(
         self,
@@ -858,7 +965,7 @@ class PackageAnalyzer:
     def _detect_used_enums(
         self, api: DartPackageAPI, plan: GenerationPlan
     ) -> set[str]:
-        """Detect enums that are referenced by methods or properties."""
+        """Detect enums that are referenced by methods, properties, or plan."""
         used: set[str] = set()
         enum_names = {e.name for e in api.enums}
 
@@ -870,13 +977,23 @@ class PackageAnalyzer:
                 for p in method.params:
                     if p.dart_type in enum_names:
                         used.add(p.dart_type)
+
+        # Check plan properties for enum type references
+        for prop in plan.properties:
+            for enum_name in enum_names:
+                if enum_name in prop.python_type:
+                    used.add(enum_name)
+
         return used
 
     def _is_useful_enum(self, dart_enum, plan: GenerationPlan) -> bool:
-        """Check if an enum is likely useful (e.g., LogLevel, Status)."""
+        """Check if an enum is likely useful beyond direct method references.
+
+        Only keeps enums for log-level configuration — these are commonly
+        exposed as control properties even when not in method signatures.
+        """
         name_lower = dart_enum.name.lower()
-        useful_patterns = ("loglevel", "level", "status", "permission", "type")
-        return any(p in name_lower for p in useful_patterns)
+        return "loglevel" in name_lower
 
     # ------------------------------------------------------------------
     # Helper checks
@@ -915,6 +1032,19 @@ class PackageAnalyzer:
         return any(p.python_name == prop_name for p in plan.properties)
 
 
+def _shorten_event_name(snake: str) -> str:
+    """Shorten verbose event names.
+
+    ``foreground_will_display`` → ``foreground``
+    (the "will_display"/"did_display" part is implied by the event handler.)
+    """
+    # Remove trailing lifecycle suffixes that are already implied
+    for suffix in ("_will_display", "_did_display", "_will_dismiss", "_did_dismiss"):
+        if snake.endswith(suffix) and len(snake) > len(suffix):
+            return snake[: -len(suffix)]
+    return snake
+
+
 def _normalize_event_class_name(name: str) -> str:
     """Normalize a Dart type name to a Python event class name.
 
@@ -942,6 +1072,54 @@ def _abbreviate_namespace(ns_name: str) -> str:
         "push_subscription": "push_subscription",
     }
     return abbreviations.get(ns_name, ns_name)
+
+
+def _normalize_param_name(
+    param_name: str,
+    method_name: str,
+    namespace: str,
+) -> str:
+    """Normalize parameter names — keep original Dart names (camel_to_snake).
+
+    Minimal normalization: the direct ``camel_to_snake`` mapping from Dart
+    parameter names is usually the best Python name.
+    """
+    return param_name
+
+
+def _normalize_method_name(
+    python_name: str,
+    dart_method_name: str,
+    method: DartMethod,
+    dart_prefix: str,
+) -> tuple[str, str]:
+    """Normalize method naming for Pythonic conventions.
+
+    Applies minimal patterns:
+    - Bare getter methods (no params, non-void return) → add ``get_`` or ``is_`` prefix
+    - Otherwise keep the direct ``camel_to_snake`` mapping from Dart
+    """
+
+    def _rebuild_dart_key(new_name: str) -> str:
+        if dart_prefix:
+            return f"{dart_prefix}_{new_name}"
+        return new_name
+
+    # Bare getter: no params, non-void return, no existing prefix → add "get_" or "is_"
+    if (
+        method.is_getter
+        and not method.params
+        and method.return_type not in ("void", "Future<void>")
+        and not python_name.startswith("get_")
+        and not python_name.startswith("is_")
+        and not python_name.startswith("are_")
+    ):
+        is_bool = method.return_type in ("bool", "bool?", "Future<bool>", "Future<bool?>")
+        prefix_word = "is_" if is_bool else "get_"
+        python_name = f"{prefix_word}{python_name}"
+        dart_method_name = _rebuild_dart_key(python_name)
+
+    return python_name, dart_method_name
 
 
 def _deduplicate_method_name(method_name: str, namespace: str) -> str:
@@ -975,6 +1153,43 @@ def _deduplicate_method_name(method_name: str, namespace: str) -> str:
                 return stripped
 
     return method_name
+
+
+# Python types that are valid and should not be replaced
+_KNOWN_PYTHON_TYPES = frozenset({
+    "str", "int", "float", "bool", "bytes", "None", "Any",
+    "list", "dict", "set", "tuple", "Optional",
+})
+
+
+def _sanitize_python_type(python_type: str) -> str:
+    """Replace unknown Dart class types with ``dict | None``.
+
+    Types like ``LiveActivitySetupOptions`` that pass through the
+    type_map unchanged are replaced with a safe fallback, since
+    they won't exist in the generated Python code.
+    """
+    # Strip nullable suffix for checking
+    base = python_type.rstrip(" |None").strip()
+    is_nullable = "None" in python_type and base != "None"
+
+    # Generic types (list[...], dict[...]) are fine
+    if "[" in python_type:
+        return python_type
+
+    # Known Python types are fine
+    if base.lower() in {t.lower() for t in _KNOWN_PYTHON_TYPES}:
+        return python_type
+
+    # Types starting with OS are enum references — keep them
+    if base.startswith("OS") or base.startswith("os"):
+        return python_type
+
+    # If it looks like a Dart class name (UpperCase), replace with dict
+    if base and base[0].isupper() and base.isidentifier():
+        return "dict | None" if is_nullable else "dict | None"
+
+    return python_type
 
 
 def _default_for_type(python_type: str) -> str:

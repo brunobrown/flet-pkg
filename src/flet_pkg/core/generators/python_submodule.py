@@ -25,6 +25,7 @@ class PythonSubModuleGenerator(CodeGenerator):
     def _render_submodule(self, sub: SubModulePlan, plan: GenerationPlan) -> str:
         lines: list[str] = []
         control_snake = plan.control_name_snake or camel_to_snake(plan.control_name)
+        self._enum_names = {e.python_name for e in plan.enums}
 
         # Module docstring
         mod_title = sub.module_name.replace("_", " ").title()
@@ -140,9 +141,17 @@ class PythonSubModuleGenerator(CodeGenerator):
             lines.append(f'        """{doc}."""')
 
         # Build arguments dict using python_name as key (matches Dart dispatch)
+        # For enum-typed params, use .value to serialize
+        enum_names = getattr(self, "_enum_names", set())
         args_dict: dict[str, str] = {}
         for p in method.params:
-            args_dict[p.python_name] = p.python_name
+            # Check if param type is an enum (strip Optional/nullable)
+            base_type = p.python_type.replace("Optional[", "").rstrip("]")
+            base_type = base_type.split("|")[0].strip()
+            if base_type in enum_names:
+                args_dict[p.python_name] = f"{p.python_name}.value"
+            else:
+                args_dict[p.python_name] = p.python_name
 
         if args_dict:
             args_str = ", ".join(f'"{k}": {v}' for k, v in args_dict.items())
