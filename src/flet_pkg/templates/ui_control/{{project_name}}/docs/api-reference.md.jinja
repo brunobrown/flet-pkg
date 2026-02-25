@@ -1,0 +1,41 @@
+# API Reference
+
+## {{ control_name }}
+
+`{{ control_name }}` is a visual Flet control based on `ft.LayoutControl`.
+
+### Import
+
+```python
+from {{ package_name }} import {{ control_name }}
+```
+
+### Properties
+
+Since `{{ control_name }}` extends `ft.LayoutControl`, it inherits all standard layout properties:
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `width` | `float` | Width of the control |
+| `height` | `float` | Height of the control |
+| `margin` | `Margin` | Margin around the control |
+| `padding` | `Padding` | Padding inside the control |
+| `align` | `Alignment` | Alignment of the control |
+| `visible` | `bool` | Whether the control is visible |
+
+### Example
+
+```python
+import flet as ft
+from {{ package_name }} import {{ control_name }}
+
+def main(page: ft.Page):
+    page.add(
+        {{ control_name }}(
+            width=200,
+            height=200,
+        ),
+    )
+
+ft.run(main)
+```

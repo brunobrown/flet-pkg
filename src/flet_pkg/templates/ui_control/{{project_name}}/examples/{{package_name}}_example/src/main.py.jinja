@@ -1,0 +1,17 @@
+import flet as ft
+from {{ package_name }} import {{ control_name }}
+
+
+def main(page: ft.Page):
+    page.title = "{{ control_name }} Example"
+
+    page.add(
+        {{ control_name }}(
+            width=200,
+            height=200,
+        ),
+    )
+
+
+if __name__ == "__main__":
+    ft.run(main)

@@ -1,0 +1,28 @@
+# {{ project_name }}
+
+{{ description }}
+
+## Overview
+
+`{{ project_name }}` is a Flet UI Control extension that provides the `{{ control_name }}` visual widget for your Flet applications.
+
+## Quick Start
+
+```bash
+pip install {{ project_name }}
+```
+
+```python
+import flet as ft
+from {{ package_name }} import {{ control_name }}
+
+def main(page: ft.Page):
+    page.add(
+        {{ control_name }}(
+            width=200,
+            height=200,
+        ),
+    )
+
+ft.run(main)
+```

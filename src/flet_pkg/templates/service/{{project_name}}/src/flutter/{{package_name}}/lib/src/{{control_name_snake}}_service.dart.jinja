@@ -1,0 +1,40 @@
+import 'package:flet/flet.dart';
+import 'package:flutter/foundation.dart';
+
+class {{ control_name }}Service extends FletService {
+  {{ control_name }}Service({required super.control});
+
+  @override
+  void init() {
+    super.init();
+    control.addInvokeMethodListener(_onInvokeMethod);
+  }
+
+  @override
+  Future<void> update() async {
+    // Handle property updates from Python side
+  }
+
+  @override
+  void dispose() {
+    super.dispose();
+  }
+
+  Future<dynamic> _onInvokeMethod(String methodName, dynamic args) async {
+    Map<String, dynamic> arguments = {};
+    if (args != null && args is Map) {
+      arguments = Map<String, dynamic>.from(args);
+    }
+
+    return switch (methodName) {
+      "example_method" => _exampleMethod(arguments),
+      _ => throw Exception("Unknown method: $methodName"),
+    };
+  }
+
+  Future<void> _exampleMethod(Map<String, dynamic> args) async {
+    final value = args["value"] as String?;
+    debugPrint("{{ control_name }}Service: example_method called with value=$value");
+    // TODO: Call the actual Flutter package SDK here
+  }
+}

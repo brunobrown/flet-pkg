@@ -1,0 +1,31 @@
+# Getting Started
+
+## Installation
+
+```bash
+pip install {{ project_name }}
+```
+
+## Basic Usage
+
+```python
+import flet as ft
+from {{ package_name }} import {{ control_name }}
+
+def main(page: ft.Page):
+    page.title = "{{ control_name }} Example"
+
+    page.add(
+        {{ control_name }}(
+            width=200,
+            height=200,
+        ),
+    )
+
+ft.run(main)
+```
+
+## Next Steps
+
+- Check the [API Reference](api-reference.md) for all available properties.
+- See the [Changelog](changelog.md) for version history.

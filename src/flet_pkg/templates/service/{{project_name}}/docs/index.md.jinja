@@ -1,0 +1,24 @@
+# {{ project_name }}
+
+{{ description }}
+
+## Overview
+
+Welcome to the {{ project_name }} documentation. This Flet extension provides the {{ control_name }} service for your Flet applications.
+
+## Quick Start
+
+```bash
+pip install {{ project_name }}
+```
+
+```python
+import flet as ft
+from {{ package_name }} import {{ control_name }}
+
+def main(page: ft.Page):
+    {{ control_name_snake }} = {{ control_name }}()
+    page.services.add({{ control_name_snake }})
+
+ft.run(main)
+```

@@ -1,0 +1,996 @@
+"""
+Package analyzer for Dart-to-Python code generation.
+
+Analyzes a ``DartPackageAPI`` and produces a ``GenerationPlan`` that
+drives the code generators: detects namespaces, events, properties,
+and maps types.
+"""
+
+from __future__ import annotations
+
+import re
+
+from flet_pkg.core.models import (
+    DartClass,
+    DartMethod,
+    DartPackageAPI,
+    EnumPlan,
+    EventPlan,
+    GenerationPlan,
+    MethodPlan,
+    ParamPlan,
+    PropertyPlan,
+    SubModulePlan,
+)
+from flet_pkg.core.parser import camel_to_snake
+from flet_pkg.core.type_map import map_dart_type, map_return_type
+
+
+class PackageAnalyzer:
+    """Analyzes a parsed Dart API and produces a generation plan.
+
+    The analyzer detects:
+    - **Namespaces**: Groups of related methods (e.g., User, Notifications)
+      that become separate Python sub-module files.
+    - **Events**: Listener/Observer methods that become ``ft.EventHandler`` attrs.
+    - **Properties**: Constructor params and getters that become dataclass fields.
+    - **Enums**: Dart enums that become Python ``Enum`` classes.
+
+    Args:
+        min_namespace_methods: Minimum methods to justify a separate sub-module.
+    """
+
+    def __init__(self, min_namespace_methods: int = 2):
+        self.min_namespace_methods = min_namespace_methods
+
+    def analyze(
+        self,
+        api: DartPackageAPI,
+        control_name: str,
+        extension_type: str,
+        flutter_package: str = "",
+        package_name: str = "",
+        description: str = "",
+    ) -> GenerationPlan:
+        """Analyze a Dart API and produce a GenerationPlan."""
+        base_class = "ft.Service" if extension_type == "service" else "ft.LayoutControl"
+        control_name_lower = control_name.lower()
+
+        # Detect the main SDK class (the one matching the control name)
+        dart_main_class = self._detect_main_class(api, control_name)
+
+        plan = GenerationPlan(
+            control_name=control_name,
+            package_name=package_name,
+            base_class=base_class,
+            description=description,
+            flutter_package=flutter_package,
+            dart_import=f"package:{flutter_package}/{flutter_package}.dart",
+            dart_main_class=dart_main_class,
+        )
+
+        # Detect namespaces by class name prefix
+        namespace_classes: dict[str, list[DartClass]] = {}
+        main_classes: list[DartClass] = []
+
+        for cls in api.classes:
+            ns = self._detect_namespace(cls, control_name, control_name_lower)
+            if ns:
+                namespace_classes.setdefault(ns, []).append(cls)
+            else:
+                main_classes.append(cls)
+
+        # Infer properties from initialize() method on main class
+        for cls in main_classes:
+            self._infer_properties_from_initialize(cls, plan)
+
+        # Infer properties from pre-init setter methods (consent, log level, etc.)
+        self._infer_pre_init_properties(api, plan, control_name)
+
+        # Process main classes: extract events, properties, methods
+        for cls in main_classes:
+            self._process_main_class(cls, plan, control_name_lower, dart_main_class, api)
+
+        # Detect sub-object namespaces (e.g., User.pushSubscription → fold into user)
+        self._fold_sub_objects(api, namespace_classes, control_name)
+
+        # Process namespace classes into sub-modules
+        for ns_name, classes in namespace_classes.items():
+            # Extract events from namespace classes (events go to main plan)
+            for cls in classes:
+                for method in cls.methods:
+                    event = self._detect_event(
+                        method, control_name, api, dart_main_class, cls.name
+                    )
+                    if event and not any(
+                        e.python_attr_name == event.python_attr_name
+                        for e in plan.events
+                    ):
+                        plan.events.append(event)
+
+            sub_module = self._build_sub_module(
+                ns_name, classes, control_name, control_name_lower, dart_main_class, plan
+            )
+            if sub_module and len(sub_module.methods) >= self.min_namespace_methods:
+                plan.sub_modules.append(sub_module)
+            else:
+                # Not enough methods for a sub-module; merge into main
+                for cls in classes:
+                    self._process_main_class(
+                        cls, plan, control_name_lower, dart_main_class, api
+                    )
+
+        # Process enums — only keep those that are used or commonly useful
+        used_enums = self._detect_used_enums(api, plan)
+        for dart_enum in api.enums:
+            if dart_enum.name in used_enums or self._is_useful_enum(dart_enum, plan):
+                plan.enums.append(
+                    EnumPlan(
+                        python_name=dart_enum.name,
+                        values=[(v, v.lower()) for v in dart_enum.values],
+                        docstring=dart_enum.docstring,
+                    )
+                )
+
+        # Set error event class name with short prefix
+        prefix = "OS" if control_name.lower().startswith("one") else control_name
+        plan.error_event_class = f"{prefix}ErrorEvent"
+
+        # Build dart_listeners from events
+        plan.dart_listeners = [
+            {
+                "event_name": event.dart_event_name,
+                "python_attr": event.python_attr_name,
+                "dart_listener_method": event.dart_listener_method,
+                "dart_sdk_accessor": event.dart_sdk_accessor,
+            }
+            for event in plan.events
+        ]
+
+        return plan
+
+    # ------------------------------------------------------------------
+    # Main SDK class detection
+    # ------------------------------------------------------------------
+
+    def _detect_main_class(
+        self, api: DartPackageAPI, control_name: str
+    ) -> str:
+        """Detect the main SDK class from the package."""
+        control_lower = control_name.lower()
+        # Priority 1: Exact match
+        for cls in api.classes:
+            if cls.name.lower() == control_lower:
+                return cls.name
+        # Priority 2: Match without "Flutter" suffix
+        for cls in api.classes:
+            name = cls.name.lower()
+            if name == control_lower.replace("flutter", ""):
+                return cls.name
+        # Priority 3: Shortest class that starts with control name prefix
+        candidates = [
+            cls for cls in api.classes
+            if cls.name.lower().startswith(control_lower)
+        ]
+        if candidates:
+            return min(candidates, key=lambda c: len(c.name)).name
+        # Fallback: control_name as-is
+        return control_name
+
+    # ------------------------------------------------------------------
+    # Namespace detection
+    # ------------------------------------------------------------------
+
+    def _detect_namespace(
+        self, cls: DartClass, control_name: str, control_name_lower: str
+    ) -> str | None:
+        """Detect if a class belongs to a namespace (sub-module)."""
+        cls_lower = cls.name.lower()
+
+        # Skip the main class itself
+        if cls_lower == control_name_lower:
+            return None
+
+        # Check prefix match: e.g., OneSignalUser -> "user"
+        if cls_lower.startswith(control_name_lower):
+            suffix = cls.name[len(control_name) :]
+            if suffix:
+                return camel_to_snake(suffix)
+
+        # Check if the class file suggests a namespace
+        if cls.source_file:
+            stem = cls.source_file.rsplit("/", maxsplit=1)[-1].replace(".dart", "")
+            if stem != control_name_lower and not stem.startswith("_"):
+                return stem
+
+        return None
+
+    # ------------------------------------------------------------------
+    # SDK accessor computation
+    # ------------------------------------------------------------------
+
+    def _compute_sdk_accessor(
+        self, cls_name: str, control_name: str, dart_main_class: str
+    ) -> str:
+        """Compute the SDK accessor path for a class.
+
+        Examples:
+            OneSignalUser with main=OneSignal -> "OneSignal.User"
+            OneSignalNotifications -> "OneSignal.Notifications"
+        """
+        if cls_name == dart_main_class:
+            return dart_main_class
+        # Strip the control name prefix to get the namespace suffix
+        control_len = len(control_name)
+        if cls_name.lower().startswith(control_name.lower()) and len(cls_name) > control_len:
+            suffix = cls_name[control_len:]
+            return f"{dart_main_class}.{suffix}"
+        return dart_main_class
+
+    # ------------------------------------------------------------------
+    # Property inference from initialize() method
+    # ------------------------------------------------------------------
+
+    def _infer_properties_from_initialize(
+        self, cls: DartClass, plan: GenerationPlan
+    ) -> None:
+        """Infer properties from the main class's initialize() method.
+
+        For example, `OneSignal.initialize(String appId)` produces a
+        property `app_id: str`.
+        """
+        for method in cls.methods:
+            if method.name != "initialize":
+                continue
+            for param in method.params:
+                python_name = camel_to_snake(param.name)
+                python_type = map_dart_type(param.dart_type)
+                if not any(p.python_name == python_name for p in plan.properties):
+                    plan.properties.append(
+                        PropertyPlan(
+                            python_name=python_name,
+                            python_type=python_type,
+                            default_value=_default_for_type(python_type),
+                            docstring=f"The {python_name.replace('_', ' ')} for {plan.control_name}.",
+                        )
+                    )
+
+    # ------------------------------------------------------------------
+    # Sub-object folding (e.g., User.pushSubscription → user module)
+    # ------------------------------------------------------------------
+
+    def _fold_sub_objects(
+        self,
+        api: DartPackageAPI,
+        namespace_classes: dict[str, list[DartClass]],
+        control_name: str,
+    ) -> None:
+        """Fold sub-object namespaces into their parent namespace.
+
+        Detects when a namespace class (e.g., ``OneSignalPushSubscription``)
+        is accessed as a getter on another namespace class (e.g.,
+        ``OneSignalUser.pushSubscription``).  When found, the sub-object's
+        methods are renamed with a short prefix and merged into the parent.
+        """
+        # Build class name → namespace mapping
+        class_to_ns: dict[str, str] = {}
+        for ns, classes in namespace_classes.items():
+            for cls in classes:
+                class_to_ns[cls.name] = ns
+
+        # Scan for getter methods that return another namespace class
+        # (child_ns, parent_ns, getter_name_prefix)
+        folds: list[tuple[str, str, str]] = []
+        for cls in api.classes:
+            parent_ns = class_to_ns.get(cls.name)
+            if not parent_ns:
+                continue
+            for method in cls.methods:
+                if not method.is_getter or method.params:
+                    continue
+                ret_clean = method.return_type.rstrip("?")
+                child_ns = class_to_ns.get(ret_clean)
+                if child_ns and child_ns != parent_ns:
+                    # Derive a short prefix from the getter name
+                    # e.g., "pushSubscription" → "push"
+                    getter_snake = camel_to_snake(method.name)
+                    short_prefix = getter_snake.split("_")[0]
+                    folds.append((child_ns, parent_ns, short_prefix))
+
+        # Execute folds: rename child methods with prefix and merge
+        for child_ns, parent_ns, prefix in folds:
+            if child_ns not in namespace_classes or parent_ns not in namespace_classes:
+                continue
+            for cls in namespace_classes[child_ns]:
+                # Filter out listener/observer methods before renaming
+                cls.methods = [
+                    m for m in cls.methods
+                    if not re.match(r"add\w*(Listener|Observer|Handler)$", m.name)
+                    and not re.match(r"remove\w*(Listener|Observer|Handler)$", m.name)
+                ]
+                # Prefix remaining method names: "optIn" → "PushOptIn"
+                for method in cls.methods:
+                    if not method.name.lower().startswith(prefix):
+                        method.name = (
+                            prefix.capitalize()
+                            + method.name[0].upper()
+                            + method.name[1:]
+                        )
+            # Remove the getter method on the parent that returned the child
+            for parent_cls in namespace_classes[parent_ns]:
+                parent_cls.methods = [
+                    m for m in parent_cls.methods
+                    if not (m.is_getter and m.return_type.rstrip("?") in class_to_ns)
+                ]
+            namespace_classes[parent_ns].extend(namespace_classes[child_ns])
+            del namespace_classes[child_ns]
+
+    # ------------------------------------------------------------------
+    # Pre-init property inference from setter methods
+    # ------------------------------------------------------------------
+
+    def _infer_pre_init_properties(
+        self,
+        api: DartPackageAPI,
+        plan: GenerationPlan,
+        control_name: str,
+    ) -> None:
+        """Infer properties from pre-init setter methods.
+
+        Detects patterns like:
+        - ``consentRequired(bool)`` → ``require_consent: bool``
+        - ``Debug.setLogLevel(OSLogLevel)`` → ``log_level: int``
+        - ``Debug.setAlertLevel(OSLogLevel)`` → ``visual_alert_level: int``
+
+        These become control properties read at Dart init time, before
+        the SDK ``initialize()`` call.
+        """
+        enum_names = {e.name for e in api.enums}
+
+        for cls in api.classes:
+            for method in cls.methods:
+                # Must be void + single non-callback param
+                if method.return_type not in ("void", "Future<void>"):
+                    continue
+                if len(method.params) != 1:
+                    continue
+                param = method.params[0]
+                if "Function" in param.dart_type or "Callback" in param.dart_type:
+                    continue
+
+                prop_name = None
+                prop_type = None
+                prop_default = None
+                prop_doc = None
+
+                dart_pre_init_call = ""
+
+                # Pattern: consentRequired(bool) → require_consent
+                if "consent" in method.name.lower() and "required" in method.name.lower():
+                    prop_name = "require_consent"
+                    prop_type = "bool"
+                    prop_default = "False"
+                    prop_doc = "Whether consent is required before initializing."
+                    sdk_accessor = self._compute_sdk_accessor(
+                        cls.name, control_name, plan.dart_main_class
+                    )
+                    dart_pre_init_call = (
+                        f"if ({{var}}) {{ {sdk_accessor}.{method.name}(true); }}"
+                    )
+
+                # Pattern: setLogLevel(EnumType) → log_level
+                elif method.name.startswith("set") and param.dart_type in enum_names:
+                    raw_name = method.name[3:]
+                    prop_name = camel_to_snake(raw_name)
+                    prop_type = "int | None"
+                    prop_default = "None"
+                    prop_doc = method.docstring or f"The {prop_name.replace('_', ' ')}."
+                    sdk_accessor = self._compute_sdk_accessor(
+                        cls.name, control_name, plan.dart_main_class
+                    )
+                    dart_pre_init_call = (
+                        f"if ({{var}} != null) {{ "
+                        f"{sdk_accessor}.{method.name}"
+                        f"({param.dart_type}.values[{{var}}]); }}"
+                    )
+
+                if prop_name and not any(
+                    p.python_name == prop_name for p in plan.properties
+                ):
+                    plan.properties.append(
+                        PropertyPlan(
+                            python_name=prop_name,
+                            python_type=prop_type,
+                            default_value=prop_default,
+                            docstring=prop_doc,
+                            dart_pre_init_call=dart_pre_init_call,
+                        )
+                    )
+
+    # ------------------------------------------------------------------
+    # Main class processing
+    # ------------------------------------------------------------------
+
+    def _process_main_class(
+        self,
+        cls: DartClass,
+        plan: GenerationPlan,
+        control_name_lower: str,
+        dart_main_class: str,
+        api: DartPackageAPI | None = None,
+    ) -> None:
+        """Extract events, properties, and methods from a main class."""
+        # Collect property names to skip methods already converted to properties
+        prop_methods = set()
+        for method in cls.methods:
+            if method.name == "initialize":
+                prop_methods.add(method.name)
+            elif "consent" in method.name.lower() and "required" in method.name.lower():
+                prop_methods.add(method.name)
+
+        for method in cls.methods:
+            # Skip methods that were converted to properties
+            if method.name in prop_methods:
+                continue
+
+            # Check if this method is an event listener
+            event = self._detect_event(
+                method, plan.control_name, api, dart_main_class, cls.name
+            )
+            if event:
+                if not any(
+                    e.python_attr_name == event.python_attr_name for e in plan.events
+                ):
+                    plan.events.append(event)
+                continue
+
+            # Skip remove*Listener/Observer methods
+            if self._is_remove_listener_method(method):
+                continue
+
+            # Skip methods with callback params (can't serialize over wire)
+            if self._has_callback_params(method):
+                continue
+
+            # Skip setter methods that were converted to properties
+            if self._is_property_setter(method, plan):
+                continue
+
+            # Check if this is a getter -> property
+            if method.is_getter and not method.params:
+                prop = PropertyPlan(
+                    python_name=camel_to_snake(method.name),
+                    python_type=map_dart_type(method.return_type),
+                    default_value=_default_for_type(map_dart_type(method.return_type)),
+                    docstring=method.docstring,
+                )
+                if not any(p.python_name == prop.python_name for p in plan.properties):
+                    plan.properties.append(prop)
+                continue
+
+            # Regular method
+            method_plan = self._build_method_plan(
+                method, "", dart_main_class, cls.name
+            )
+            if not any(
+                m.python_name == method_plan.python_name for m in plan.main_methods
+            ):
+                plan.main_methods.append(method_plan)
+
+    # ------------------------------------------------------------------
+    # Sub-module building
+    # ------------------------------------------------------------------
+
+    def _build_sub_module(
+        self,
+        ns_name: str,
+        classes: list[DartClass],
+        control_name: str,
+        control_name_lower: str,
+        dart_main_class: str,
+        plan: GenerationPlan | None = None,
+    ) -> SubModulePlan | None:
+        """Build a SubModulePlan from namespace classes."""
+        class_name = (
+            f"{control_name}"
+            f"{ns_name.replace('_', ' ').title().replace(' ', '')}"
+        )
+        dart_prefix = ns_name
+
+        methods: list[MethodPlan] = []
+        docstrings: list[str] = []
+        dart_class_name = ""
+        dart_sdk_accessor = ""
+
+        for cls in classes:
+            if cls.docstring:
+                docstrings.append(cls.docstring)
+            if not dart_class_name:
+                dart_class_name = cls.name
+                dart_sdk_accessor = self._compute_sdk_accessor(
+                    cls.name, control_name, dart_main_class
+                )
+            for method in cls.methods:
+                # Skip event listeners (handled at main level)
+                if self._is_listener_method(method):
+                    continue
+                # Skip remove*Listener/Observer methods
+                if self._is_remove_listener_method(method):
+                    continue
+                # Skip methods with callback params
+                if self._has_callback_params(method):
+                    continue
+                # Skip setter methods that were converted to properties
+                # (but keep them in namespace sub-modules for runtime use)
+                if plan and self._is_property_setter(
+                    method, plan, in_namespace=True
+                ):
+                    pass  # Keep in namespace as method
+                method_plan = self._build_method_plan(
+                    method, dart_prefix, dart_sdk_accessor, cls.name
+                )
+                if not any(m.python_name == method_plan.python_name for m in methods):
+                    methods.append(method_plan)
+
+        if not methods:
+            return None
+
+        return SubModulePlan(
+            module_name=ns_name,
+            class_name=class_name,
+            dart_prefix=dart_prefix,
+            methods=methods,
+            docstring=(
+                " ".join(docstrings)
+                if docstrings
+                else f"{control_name} {ns_name} namespace."
+            ),
+            dart_class_name=dart_class_name,
+            dart_sdk_accessor=dart_sdk_accessor,
+        )
+
+    # ------------------------------------------------------------------
+    # Method building
+    # ------------------------------------------------------------------
+
+    def _build_method_plan(
+        self,
+        method: DartMethod,
+        dart_prefix: str,
+        dart_sdk_accessor: str,
+        dart_class_name: str,
+    ) -> MethodPlan:
+        """Convert a DartMethod to a MethodPlan."""
+        python_name = camel_to_snake(method.name)
+
+        # Use abbreviation for the prefix in dart method keys
+        abbreviated_prefix = _abbreviate_namespace(dart_prefix) if dart_prefix else ""
+
+        if abbreviated_prefix:
+            # Deduplicate: if method name starts with singular form of namespace,
+            # strip it. E.g., "remove_notification" in "notifications" → "remove"
+            clean_name = _deduplicate_method_name(python_name, dart_prefix)
+            dart_method_name = f"{abbreviated_prefix}_{clean_name}"
+        else:
+            dart_method_name = python_name
+
+        python_return, _dart_is_async = map_return_type(method.return_type)
+
+        params: list[ParamPlan] = []
+        for p in method.params:
+            python_type = map_dart_type(p.dart_type)
+            params.append(
+                ParamPlan(
+                    python_name=camel_to_snake(p.name) if p.name != p.name.lower() else p.name,
+                    python_type=python_type,
+                    dart_name=p.name,
+                    dart_type=p.dart_type,
+                    is_optional=not p.required and p.named,
+                    default=p.default,
+                )
+            )
+
+        # ALL methods are forced async because they call _invoke_method
+        return MethodPlan(
+            python_name=python_name,
+            dart_method_name=dart_method_name,
+            params=params,
+            return_type=python_return,
+            docstring=method.docstring,
+            is_async=True,
+            dart_original_name=method.name,
+            dart_class_name=dart_class_name,
+        )
+
+    # ------------------------------------------------------------------
+    # Event detection
+    # ------------------------------------------------------------------
+
+    def _detect_event(
+        self,
+        method: DartMethod,
+        control_name: str,
+        api: DartPackageAPI | None,
+        dart_main_class: str,
+        source_class_name: str,
+    ) -> EventPlan | None:
+        """Detect if a method registers an event listener."""
+        name = method.name
+
+        # Patterns: addXxxListener, addXxxObserver, addXxxHandler
+        # Also: addListener, addObserver (empty core)
+        listener_match = re.match(r"add(\w*?)(Listener|Observer|Handler)$", name)
+        if not listener_match:
+            return None
+
+        event_core = listener_match.group(1)
+
+        # Build a meaningful event name with namespace prefix
+        sdk_accessor = self._compute_sdk_accessor(
+            source_class_name, control_name, dart_main_class
+        )
+        # Determine namespace prefix for event naming
+        ns_prefix = self._event_namespace_prefix(source_class_name, control_name)
+
+        # If event_core is empty (e.g., addObserver), derive from context
+        if not event_core:
+            event_core = self._derive_event_core_from_context(
+                method, source_class_name, control_name, api
+            )
+
+        snake = camel_to_snake(event_core) if event_core else "change"
+
+        # Deduplicate: if snake already starts with the namespace prefix,
+        # strip it to avoid "on_user_user_change" → "on_user_change".
+        if ns_prefix and snake.startswith(ns_prefix + "_"):
+            snake = snake[len(ns_prefix) + 1 :]
+        elif ns_prefix and snake.startswith(ns_prefix):
+            snake = snake[len(ns_prefix) :].lstrip("_") or "change"
+
+        if ns_prefix:
+            python_attr = f"on_{ns_prefix}_{snake}"
+            dart_event_name = f"{ns_prefix}_{snake}"
+        else:
+            python_attr = f"on_{snake}"
+            dart_event_name = snake
+
+        # Try to extract the event type name from callback parameter
+        event_class_name = self._derive_event_class_name(
+            method, control_name, event_core, api
+        )
+
+        # Extract event fields from helper classes if available
+        fields = self._extract_event_fields(method, api)
+
+        return EventPlan(
+            python_attr_name=python_attr,
+            event_class_name=event_class_name,
+            dart_event_name=dart_event_name,
+            fields=fields,
+            dart_listener_method=name,
+            dart_sdk_accessor=sdk_accessor,
+        )
+
+    def _derive_event_core_from_context(
+        self,
+        method: DartMethod,
+        source_class_name: str,
+        control_name: str,
+        api: DartPackageAPI | None,
+    ) -> str:
+        """Derive event core name when the listener method has no descriptive name.
+
+        For example: ``OneSignalUser.addObserver`` → event core "Change"
+        (derived from callback type ``OnUserChangeObserver``).
+        """
+        # Try to extract from callback parameter typedef name
+        if method.params:
+            param_type = method.params[0].dart_type
+            # Pattern: On{Something}Observer/Listener → extract {Something}
+            m = re.match(r"On(\w+?)(Observer|Listener|Handler|Change)$", param_type)
+            if m:
+                return m.group(1) + (m.group(2) if m.group(2) == "Change" else "")
+
+            # Try typedef resolution
+            if api and param_type in api.typedefs:
+                resolved_type = api.typedefs[param_type]
+                # Look for Change/Changed in the resolved type name
+                m2 = re.match(r"\w*?(Change\w*|Changed\w*)$", resolved_type)
+                if m2:
+                    return m2.group(1)
+
+        # Fallback: derive from class name
+        suffix = source_class_name[len(control_name):]
+        if suffix:
+            return suffix + "Change"
+        return "Change"
+
+    def _event_namespace_prefix(
+        self, source_class_name: str, control_name: str
+    ) -> str:
+        """Compute a short prefix for event names based on source class.
+
+        OneSignalNotifications -> "notification"
+        OneSignalInAppMessages -> "iam"
+        OneSignal (main) -> "" (no prefix)
+        """
+        if source_class_name.lower() == control_name.lower():
+            return ""
+        suffix = source_class_name[len(control_name) :]
+        if not suffix:
+            return ""
+        snake = camel_to_snake(suffix)
+        # Common abbreviations
+        abbreviations = {
+            "notifications": "notification",
+            "in_app_messages": "iam",
+            "push_subscription": "push_subscription",
+        }
+        return abbreviations.get(snake, snake)
+
+    def _derive_event_class_name(
+        self,
+        method: DartMethod,
+        control_name: str,
+        event_core: str,
+        api: DartPackageAPI | None = None,
+    ) -> str:
+        """Derive a proper event class name.
+
+        Always returns names ending in ``Event``.  If the Dart SDK uses
+        a ``*State``/``*ChangedState`` type for its observer callback, the
+        generated Python event class is still named ``*Event`` for
+        consistency.
+        """
+        # Check callback parameter for a type hint
+        if method.params:
+            cb_type = method.params[0].dart_type
+
+            # Direct match: parameter type already contains "Event"
+            type_match = re.search(r"\b([A-Z]\w+Event)\b", cb_type)
+            if type_match:
+                return type_match.group(1)
+
+            # Resolve typedef to find event type
+            if api and cb_type in api.typedefs:
+                resolved = api.typedefs[cb_type]
+                type_match = re.search(r"\b([A-Z]\w+)\b", resolved)
+                if type_match:
+                    resolved_name = type_match.group(1)
+                    # Normalize *State → *Event
+                    return _normalize_event_class_name(resolved_name)
+
+        # Generate name: OS + EventCore + Event
+        prefix = "OS" if control_name.lower().startswith("one") else control_name
+        return f"{prefix}{event_core}Event"
+
+    def _extract_event_fields(
+        self,
+        method: DartMethod,
+        api: DartPackageAPI | None,
+    ) -> list[tuple[str, str]]:
+        """Extract typed event fields from the callback's event type class."""
+        if not api or not method.params:
+            return [("data", "dict")]
+
+        cb_type = method.params[0].dart_type
+
+        # Resolve typedef first
+        actual_type = cb_type
+        if cb_type in api.typedefs:
+            actual_type = api.typedefs[cb_type]
+
+        # For simple/primitive callback types (e.g., bool for permission change)
+        if actual_type in ("bool", "bool?"):
+            return [("value", "bool")]
+        if actual_type in ("String", "String?"):
+            return [("value", "str")]
+        if actual_type in ("int", "int?"):
+            return [("value", "int")]
+
+        # Try to find the event type in helper_classes
+        type_match = re.search(r"\b([A-Z]\w+)\b", actual_type)
+        if not type_match:
+            return [("data", "dict")]
+
+        event_type_name = type_match.group(1)
+
+        # Search helper_classes for matching type
+        for helper_cls in api.helper_classes:
+            if helper_cls.name == event_type_name:
+                return self._extract_fields_from_helper(helper_cls, api)
+
+        return [("data", "dict")]
+
+    def _extract_fields_from_helper(
+        self,
+        helper_cls: DartClass,
+        api: DartPackageAPI,
+    ) -> list[tuple[str, str]]:
+        """Extract fields from a helper class, following nested types.
+
+        When a helper has a ``current`` field pointing to another helper,
+        the nested fields are expanded in-place so the Python event carries
+        the leaf-level data directly.
+        """
+        fields: list[tuple[str, str]] = []
+
+        for m in helper_cls.methods:
+            if not m.is_getter or m.params:
+                continue
+            py_name = camel_to_snake(m.name)
+            py_type = map_dart_type(m.return_type)
+            dart_type_clean = m.return_type.rstrip("?")
+
+            # If this field points to another helper class, expand it
+            nested_cls = None
+            for hc in api.helper_classes:
+                if hc.name == dart_type_clean:
+                    nested_cls = hc
+                    break
+
+            if nested_cls and py_name in ("current", "previous"):
+                # Expand "current" inline; skip "previous" (redundant)
+                if py_name == "current":
+                    nested_fields = self._extract_fields_from_helper(nested_cls, api)
+                    if nested_fields and nested_fields != [("data", "dict")]:
+                        fields.extend(nested_fields)
+                continue
+
+            # Simplify complex types to basic Python types
+            if py_type not in (
+                "str", "int", "float", "bool", "Any",
+                "str | None", "int | None", "float | None",
+                "bool | None",
+            ) and not py_type.startswith("list") and not py_type.startswith("dict"):
+                py_type = "dict"
+            fields.append((py_name, py_type))
+
+        if fields:
+            return fields
+
+        return [("data", "dict")]
+
+    # ------------------------------------------------------------------
+    # Enum filtering
+    # ------------------------------------------------------------------
+
+    def _detect_used_enums(
+        self, api: DartPackageAPI, plan: GenerationPlan
+    ) -> set[str]:
+        """Detect enums that are referenced by methods or properties."""
+        used: set[str] = set()
+        enum_names = {e.name for e in api.enums}
+
+        # Check all method params and return types
+        for cls in api.classes:
+            for method in cls.methods:
+                if method.return_type in enum_names:
+                    used.add(method.return_type)
+                for p in method.params:
+                    if p.dart_type in enum_names:
+                        used.add(p.dart_type)
+        return used
+
+    def _is_useful_enum(self, dart_enum, plan: GenerationPlan) -> bool:
+        """Check if an enum is likely useful (e.g., LogLevel, Status)."""
+        name_lower = dart_enum.name.lower()
+        useful_patterns = ("loglevel", "level", "status", "permission", "type")
+        return any(p in name_lower for p in useful_patterns)
+
+    # ------------------------------------------------------------------
+    # Helper checks
+    # ------------------------------------------------------------------
+
+    def _is_listener_method(self, method: DartMethod) -> bool:
+        """Check if a method is a listener registration."""
+        return bool(re.match(r"add\w*(Listener|Observer|Handler)$", method.name))
+
+    def _is_remove_listener_method(self, method: DartMethod) -> bool:
+        """Check if a method is a listener removal."""
+        return bool(re.match(r"remove\w*(Listener|Observer|Handler)$", method.name))
+
+    def _has_callback_params(self, method: DartMethod) -> bool:
+        """Check if any params are callback/function types (not serializable)."""
+        for p in method.params:
+            t = p.dart_type
+            if "Function" in t or "Callback" in t or "void " in t:
+                return True
+        return False
+
+    def _is_property_setter(
+        self, method: DartMethod, plan: GenerationPlan, *, in_namespace: bool = False
+    ) -> bool:
+        """Check if a setter method was converted to a property.
+
+        When ``in_namespace`` is True, the setter is kept as a method
+        (for runtime use from the sub-module) and NOT skipped.
+        """
+        if in_namespace:
+            return False  # Keep setters as methods in sub-modules
+        if not method.name.startswith("set") or len(method.params) != 1:
+            return False
+        raw_name = method.name[3:]
+        prop_name = camel_to_snake(raw_name)
+        return any(p.python_name == prop_name for p in plan.properties)
+
+
+def _normalize_event_class_name(name: str) -> str:
+    """Normalize a Dart type name to a Python event class name.
+
+    Ensures the name ends with ``Event``.  Replaces ``*State``/``*ChangedState``
+    suffixes with ``Event``.
+    """
+    if name.endswith("Event"):
+        return name
+    if name.endswith("ChangedState"):
+        return name[: -len("ChangedState")] + "ChangedEvent"
+    if name.endswith("State"):
+        return name[: -len("State")] + "Event"
+    return name + "Event"
+
+
+def _abbreviate_namespace(ns_name: str) -> str:
+    """Return an abbreviated prefix for Dart method keys.
+
+    Common abbreviations to shorten dispatch keys:
+    ``in_app_messages`` → ``iam``, ``push_subscription`` → ``push_subscription``.
+    """
+    abbreviations = {
+        "in_app_messages": "iam",
+        "notifications": "notifications",
+        "push_subscription": "push_subscription",
+    }
+    return abbreviations.get(ns_name, ns_name)
+
+
+def _deduplicate_method_name(method_name: str, namespace: str) -> str:
+    """Remove redundant namespace word from method name.
+
+    E.g., ``remove_notification`` in namespace ``notifications`` → ``remove``
+         ``enter_live_activity`` in namespace ``live_activities`` → ``enter``
+    """
+    # Build singular forms: "notifications" → ["notification", "notifications"]
+    # "live_activities" → ["live_activity", "live_activities"]
+    ns_words = []
+    if namespace.endswith("s"):
+        ns_words.append(namespace[:-1])  # singular
+        # Handle "ies" → "y": "live_activities" → "live_activity"
+        if namespace.endswith("ies"):
+            ns_words.append(namespace[:-3] + "y")
+    ns_words.append(namespace)
+
+    for ns_word in ns_words:
+        # Check if method_name ends with _<namespace_word>
+        suffix = f"_{ns_word}"
+        if method_name.endswith(suffix):
+            stripped = method_name[: -len(suffix)]
+            if stripped:  # Don't strip if it would leave empty
+                return stripped
+        # Check if method_name starts with <namespace_word>_
+        prefix = f"{ns_word}_"
+        if method_name.startswith(prefix):
+            stripped = method_name[len(prefix) :]
+            if stripped:
+                return stripped
+
+    return method_name
+
+
+def _default_for_type(python_type: str) -> str:
+    """Return a sensible default value string for a Python type."""
+    if python_type == "str":
+        return '""'
+    if python_type == "bool":
+        return "False"
+    if python_type == "int":
+        return "0"
+    if python_type == "float":
+        return "0.0"
+    if "None" in python_type:
+        return "None"
+    if python_type.startswith("list"):
+        return "field(default_factory=list)"
+    if python_type.startswith("dict"):
+        return "field(default_factory=dict)"
+    return "None"

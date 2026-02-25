@@ -1,0 +1,17 @@
+from typing import Optional
+import flet as ft
+
+
+@ft.control("{{ control_name }}")
+class {{ control_name }}(ft.Service):
+    """{{ description }}"""
+
+    # TODO: Add your properties here
+    # example_property: str = ""
+
+    # TODO: Add your event handlers here
+    # on_event: Optional[ft.EventHandler["{{ control_name }}Event"]] = None
+
+    async def example_method(self, value: str) -> None:
+        """Example method that calls Flutter side."""
+        await self._invoke_method("example_method", {"value": value})

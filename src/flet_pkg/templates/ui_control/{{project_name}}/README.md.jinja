@@ -1,0 +1,38 @@
+# {{ project_name }}
+
+{{ description }}
+
+## Installation
+
+```bash
+pip install {{ project_name }}
+```
+
+## Usage
+
+```python
+import flet as ft
+from {{ package_name }} import {{ control_name }}
+
+def main(page: ft.Page):
+    page.title = "{{ control_name }} Example"
+
+    page.add(
+        {{ control_name }}(
+            width=200,
+            height=200,
+        ),
+    )
+
+ft.run(main)
+```
+
+## Development
+
+```bash
+pip install -e ".[dev]"
+```
+
+## License
+
+MIT

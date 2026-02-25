@@ -1,0 +1,12 @@
+from {{ package_name }} import {{ control_name }}
+
+
+def test_import():
+    """Test that the {{ control_name }} class can be imported."""
+    assert {{ control_name }} is not None
+
+
+def test_instance():
+    """Test that a {{ control_name }} instance can be created."""
+    instance = {{ control_name }}()
+    assert instance is not None
