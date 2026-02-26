@@ -128,6 +128,12 @@ class PropertyPlan:
     python_type: str = "str"
     default_value: str = '""'
     docstring: str = ""
+    dart_name: str = ""
+    """Original camelCase Dart parameter name.
+
+    Used by the Dart widget generator to emit correct constructor calls.
+    Falls back to ``python_name`` when empty.
+    """
     dart_pre_init_call: str = ""
     """Optional Dart code template for pre-init setter call.
 

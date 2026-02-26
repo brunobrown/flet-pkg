@@ -174,7 +174,8 @@ class DartServiceGenerator(CodeGenerator):
         for prop in plan.properties:
             dart_var = _to_camel_case(prop.python_name)
             # Use the original Dart param name for the constructor
-            lines.append(f"          {prop.python_name}: {dart_var},")
+            dart_param = prop.dart_name or prop.python_name
+            lines.append(f"          {dart_param}: {dart_var},")
         lines.append("        ),")
         lines.append("      );")
 

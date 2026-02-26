@@ -134,9 +134,10 @@ WIDGET_BASES = (
 )
 
 # Dart types that are Flutter-internal and should NOT become Flet properties.
+# Note: "Widget" is intentionally excluded — for ui_control extensions,
+# Widget maps to ft.Control (a valid child control property).
 _WIDGET_INTERNAL_TYPES = {
     "Key",
-    "Widget",
     "BuildContext",
     "GlobalKey",
     "ValueKey",
@@ -616,7 +617,7 @@ def _parse_constructor_params(class_name: str, class_block: str) -> list[DartPar
     field_docs: dict[str, str] = {}
     for m in re.finditer(
         r"((?:///[^\n]*\n\s*)*)"
-        r"(?:late\s+)?(?:final\s+)?"
+        r"(?:late\s+)?final\s+"
         r"([\w]+(?:<[^;]*?>)?(?:\?)?)\s+"
         r"(\w+)\s*(?:=[^;]*)?;",
         class_block,

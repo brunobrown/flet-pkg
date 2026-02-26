@@ -528,6 +528,138 @@ class TestEnumLikeSuffixHeuristic:
         assert prop.python_type == "dict | None"
 
 
+class TestParserFieldRegex:
+    """Bug 1: Ensure `return child;` is not matched as a field declaration."""
+
+    def test_widget_child_type_not_return(self, analyzer):
+        """Widget? child should map to ft.Control | None, not return | None."""
+        api = DartPackageAPI(
+            classes=[
+                DartClass(
+                    name="CameraPreview",
+                    parent_class="StatelessWidget",
+                    constructor_params=[
+                        DartParam(name="child", dart_type="Widget?"),
+                    ],
+                ),
+            ]
+        )
+        plan = analyzer.analyze(api, "Camera", "ui_control", "camera", "flet_camera")
+        child_props = [p for p in plan.properties if p.python_name == "child"]
+        assert len(child_props) == 1
+        assert "return" not in child_props[0].python_type
+        assert "ft.Control" in child_props[0].python_type
+
+
+class TestDartNamePreserved:
+    """Bug 2: PropertyPlan.dart_name should preserve original camelCase."""
+
+    def test_dart_name_stored(self, analyzer):
+        api = DartPackageAPI(
+            classes=[
+                DartClass(
+                    name="WebView",
+                    parent_class="StatefulWidget",
+                    constructor_params=[
+                        DartParam(name="initialUrl", dart_type="String?"),
+                        DartParam(name="debuggingEnabled", dart_type="bool"),
+                    ],
+                ),
+            ]
+        )
+        plan = analyzer.analyze(api, "WebView", "ui_control", "webview_flutter", "flet_webview")
+        prop_map = {p.python_name: p for p in plan.properties}
+        assert prop_map["initial_url"].dart_name == "initialUrl"
+        assert prop_map["debugging_enabled"].dart_name == "debuggingEnabled"
+
+
+class TestPolicySuffix:
+    """Bug 3: AutoMediaPlaybackPolicy should map to str, not dict."""
+
+    def test_policy_suffix_maps_to_str(self, analyzer):
+        api = DartPackageAPI(
+            classes=[
+                DartClass(
+                    name="WebView",
+                    parent_class="StatefulWidget",
+                    constructor_params=[
+                        DartParam(
+                            name="initialMediaPlaybackPolicy",
+                            dart_type="AutoMediaPlaybackPolicy",
+                        ),
+                    ],
+                ),
+            ]
+        )
+        plan = analyzer.analyze(api, "WebView", "ui_control", "webview_flutter", "flet_webview")
+        props = {p.python_name: p for p in plan.properties}
+        assert "str" in props["initial_media_playback_policy"].python_type
+
+    def test_strategy_suffix_maps_to_str(self, analyzer):
+        api = DartPackageAPI(
+            classes=[
+                DartClass(
+                    name="Foo",
+                    parent_class="StatefulWidget",
+                    constructor_params=[
+                        DartParam(name="loadStrategy", dart_type="LoadStrategy"),
+                    ],
+                ),
+            ]
+        )
+        plan = analyzer.analyze(api, "Foo", "ui_control", "foo", "flet_foo")
+        props = {p.python_name: p for p in plan.properties}
+        assert "str" in props["load_strategy"].python_type
+
+
+class TestUnknownGenericOuters:
+    """Bug 4a: Unknown generic wrappers like Factory[...] → dict | None."""
+
+    def test_factory_wrapper_collapsed(self, analyzer):
+        api = DartPackageAPI(
+            classes=[
+                DartClass(
+                    name="WebView",
+                    parent_class="StatefulWidget",
+                    constructor_params=[
+                        DartParam(
+                            name="gestureRecognizers",
+                            dart_type="Set<Factory<OneSequenceGestureRecognizer>>?",
+                        ),
+                    ],
+                ),
+            ]
+        )
+        plan = analyzer.analyze(api, "WebView", "ui_control", "webview_flutter", "flet_webview")
+        props = {p.python_name: p for p in plan.properties}
+        ptype = props["gesture_recognizers"].python_type
+        # Factory should NOT appear in the type
+        assert "Factory" not in ptype
+
+    def test_undefined_inner_type_sanitized(self, analyzer):
+        """Types from barrel (known_types) not actually generated → dict."""
+        api = DartPackageAPI(
+            classes=[
+                DartClass(
+                    name="WebView",
+                    parent_class="StatefulWidget",
+                    constructor_params=[
+                        DartParam(
+                            name="initialCookies",
+                            dart_type="List<WebViewCookie>",
+                        ),
+                    ],
+                ),
+            ]
+        )
+        plan = analyzer.analyze(api, "WebView", "ui_control", "webview_flutter", "flet_webview")
+        props = {p.python_name: p for p in plan.properties}
+        ptype = props["initial_cookies"].python_type
+        # WebViewCookie is not generated as a Python class → should be dict
+        assert "WebViewCookie" not in ptype
+        assert "list[" in ptype
+
+
 class TestFallback:
     def test_empty_api(self, analyzer):
         api = DartPackageAPI()

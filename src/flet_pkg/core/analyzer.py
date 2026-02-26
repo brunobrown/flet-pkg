@@ -476,6 +476,7 @@ class PackageAnalyzer:
                     python_type=python_type,
                     default_value=default_value,
                     docstring="",
+                    dart_name=param.name,
                     dart_getter=dart_getter,
                 )
             )
@@ -512,6 +513,11 @@ class PackageAnalyzer:
                 )
             )
             generated_names.add(helper_name)
+
+        # Post-process: re-sanitize property types against actually-generated
+        # type names.  Types from `known_types` (barrel analysis) that were
+        # NOT generated as Python classes must be replaced with `dict`.
+        _post_sanitize_property_types(plan, generated_names)
 
     # Suffixes that indicate internal/non-user-facing widget classes.
     _INTERNAL_WIDGET_SUFFIXES = (
@@ -1743,6 +1749,10 @@ _ENUM_LIKE_SUFFIXES = (
     "Curve",
     "Cap",
     "Join",
+    "Policy",
+    "Strategy",
+    "Type",
+    "State",
 )
 
 # Python types that are valid and should not be replaced
@@ -1786,9 +1796,13 @@ def _sanitize_python_type(
         base = python_type.strip()
 
     # Generic types (list[...], dict[...]) — sanitize inner types recursively
+    _KNOWN_GENERIC_OUTERS = {"list", "dict", "set", "tuple", "frozenset", "optional"}
     if "[" in python_type:
         bracket_start = python_type.index("[")
-        outer = python_type[:bracket_start]
+        outer = python_type[:bracket_start].strip()
+        # Unknown generic wrappers (Factory, ValueChanged, etc.) → dict | None
+        if outer.lower() not in _KNOWN_GENERIC_OUTERS:
+            return "dict | None"
         inner = python_type[bracket_start + 1 : python_type.rindex("]")]
         sanitized_inner = _sanitize_python_type(inner, known_types)
         return f"{outer}[{sanitized_inner}]"
@@ -1834,3 +1848,58 @@ def _default_for_type(python_type: str) -> str:
     if python_type.startswith("dict"):
         return "field(default_factory=dict)"
     return "None"
+
+
+def _post_sanitize_property_types(
+    plan: "GenerationPlan",
+    generated_names: set[str],
+) -> None:
+    """Re-sanitize property types against actually-generated type names.
+
+    Types from barrel analysis (``known_types``) that were NOT generated as
+    Python classes/enums are replaced with ``dict | None``.
+    """
+    # Build the set of types that are valid in generated Python code
+    valid = set(generated_names)
+    valid.update(t.lower() for t in _KNOWN_PYTHON_TYPES)
+    # Flet types (ft.Color, ft.Alignment, etc.) are always valid
+    flet_prefixes = ("ft.",)
+
+    for prop in plan.properties:
+        prop.python_type = _resanitize_type(prop.python_type, valid, flet_prefixes)
+
+
+def _resanitize_type(
+    python_type: str,
+    valid_types: set[str],
+    flet_prefixes: tuple[str, ...],
+) -> str:
+    """Replace undefined class references in a type annotation."""
+    is_nullable = python_type.endswith("| None") or python_type.endswith("|None")
+    if is_nullable:
+        base = re.sub(r"\s*\|\s*None$", "", python_type).strip()
+    else:
+        base = python_type.strip()
+
+    # Generic types — recurse into inner
+    if "[" in base:
+        bracket_start = base.index("[")
+        outer = base[:bracket_start].strip()
+        inner = base[bracket_start + 1 : base.rindex("]")]
+        sanitized_inner = _resanitize_type(inner, valid_types, flet_prefixes)
+        result = f"{outer}[{sanitized_inner}]"
+        if is_nullable:
+            return f"{result} | None"
+        return result
+
+    # Known Python builtins, Flet types, generated types — keep
+    if base.lower() in valid_types:
+        return python_type
+    if any(base.startswith(p) for p in flet_prefixes):
+        return python_type
+
+    # Unknown UpperCase type → dict | None
+    if base and base[0].isupper() and base.isidentifier():
+        return "dict | None"
+
+    return python_type

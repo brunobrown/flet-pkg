@@ -361,6 +361,41 @@ class TestDartUIControlGenerator:
         content = files["rive_widget.dart"]
         assert "FletWidget" not in content
 
+    def test_dart_constructor_uses_camel_case_names(self):
+        """Bug 2: Dart constructor args must use camelCase, not snake_case."""
+        plan = GenerationPlan(
+            control_name="WebView",
+            package_name="flet_webview",
+            base_class="ft.LayoutControl",
+            flutter_package="webview_flutter",
+            dart_import="package:webview_flutter/webview_flutter.dart",
+            dart_main_class="WebView",
+            properties=[
+                PropertyPlan(
+                    python_name="initial_url",
+                    python_type="str | None",
+                    default_value="None",
+                    dart_name="initialUrl",
+                ),
+                PropertyPlan(
+                    python_name="debugging_enabled",
+                    python_type="bool",
+                    default_value="False",
+                    dart_name="debuggingEnabled",
+                    dart_getter='widget.control.getBool("debugging_enabled", false)!',
+                ),
+            ],
+        )
+        gen = DartServiceGenerator()
+        files = gen.generate(plan)
+        content = files["web_view_widget.dart"]
+        # Constructor args must use camelCase Dart names
+        assert "initialUrl: initialUrl," in content
+        assert "debuggingEnabled: debuggingEnabled," in content
+        # Must NOT use snake_case
+        assert "initial_url:" not in content
+        assert "debugging_enabled:" not in content
+
 
 class TestPythonControlFieldImport:
     """Tests for field(default_factory) import in python_control.py."""
