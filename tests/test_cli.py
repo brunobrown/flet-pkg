@@ -1,9 +1,15 @@
+from unittest.mock import patch
+
 from typer.testing import CliRunner
 
 from flet_pkg import __version__
 from flet_pkg.main import app
 
 runner = CliRunner()
+
+
+def _no_registry_check(project_name: str) -> None:
+    """Stub that skips the PyPI/GitHub check during tests."""
 
 
 class TestCLI:
@@ -27,6 +33,7 @@ class TestCLI:
         result = runner.invoke(app, ["create", "--type", "invalid"])
         assert result.exit_code == 1
 
+    @patch("flet_pkg.commands.create._check_existing_packages", _no_registry_check)
     def test_create_service_non_interactive(self, tmp_path):
         result = runner.invoke(
             app,
@@ -45,6 +52,7 @@ class TestCLI:
         assert (tmp_path / "flet-onesignal").is_dir()
         assert (tmp_path / "flet-onesignal" / "pyproject.toml").is_file()
 
+    @patch("flet_pkg.commands.create._check_existing_packages", _no_registry_check)
     def test_create_ui_control_non_interactive(self, tmp_path):
         result = runner.invoke(
             app,

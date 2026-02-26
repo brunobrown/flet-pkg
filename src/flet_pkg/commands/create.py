@@ -3,7 +3,13 @@ from typing import Optional
 
 import typer
 
-from flet_pkg.core.prompts import ask, ask_choice
+from flet_pkg.core.prompts import ask, ask_choice, ask_confirm
+from flet_pkg.core.registry_checker import (
+    RegistryMatch,
+    check_flet_packages,
+    check_github,
+    check_pypi,
+)
 from flet_pkg.core.scaffolder import Scaffolder
 from flet_pkg.core.validators import (
     derive_names,
@@ -17,14 +23,15 @@ from flet_pkg.ui.panels import error_panel, header_panel, info_panel
 from flet_pkg.ui.tree import print_tree
 
 EXTENSION_TYPES = {
-    1: ("service", "Service (no visual interface)"),
-    2: ("ui_control", "UI Control (visual widget)"),
+    1: ("auto", "Auto-detect (recommended)"),
+    2: ("service", "Service (no visual interface)"),
+    3: ("ui_control", "UI Control (visual widget)"),
 }
 
 
 def create(
     extension_type: Optional[str] = typer.Option(
-        None, "--type", "-t", help="Extension type: service or ui_control."
+        None, "--type", "-t", help="Extension type: auto, service or ui_control."
     ),
     flutter_package: Optional[str] = typer.Option(
         None, "--flutter-package", "-f", help="Flutter package name from pub.dev."
@@ -45,14 +52,29 @@ def create(
     # Extension type
     if extension_type:
         template_name = extension_type
-        if template_name not in ("service", "ui_control"):
-            error_panel("Error", f"Invalid type: {template_name}. Use 'service' or 'ui_control'.")
+        if template_name not in ("auto", "service", "ui_control"):
+            error_panel(
+                "Error",
+                f"Invalid type: {template_name}. Use 'auto', 'service' or 'ui_control'.",
+            )
             raise typer.Exit(1)
     else:
         choice = ask_choice("Extension type:", [(k, v[1]) for k, v in EXTENSION_TYPES.items()])
         template_name = EXTENSION_TYPES[choice][0]
 
-    # Flutter package
+    # When auto-detect is selected we need the Flutter package name first
+    # so we can download and inspect it.
+    if template_name == "auto" and not flutter_package:
+        flutter_package = ask(
+            "Flutter package name (from pub.dev)",
+            validator=validate_flutter_package,
+        )
+
+    if template_name == "auto":
+        assert flutter_package is not None
+        template_name = _auto_detect_type(flutter_package, local_package)
+
+    # Flutter package (ask if not yet provided)
     if not flutter_package:
         flutter_package = ask(
             "Flutter package name (from pub.dev)",
@@ -67,6 +89,9 @@ def create(
         default=derived.project_name,
         validator=validate_project_name,
     )
+
+    # Check PyPI / GitHub for existing packages
+    _check_existing_packages(project_name)
 
     # Package name
     package_name = ask(
@@ -149,3 +174,74 @@ def create(
         "Next Steps",
         f"cd {project_name}\nuv sync",
     )
+
+
+def _auto_detect_type(
+    flutter_package: str,
+    local_package: Path | None = None,
+) -> str:
+    """Download (or locate) the Flutter package and detect extension type.
+
+    Returns ``"ui_control"`` or ``"service"``.  Falls back to a manual
+    choice prompt if the download or detection fails.
+    """
+    from flet_pkg.core.downloader import PubDevDownloader
+    from flet_pkg.core.parser import detect_extension_type
+
+    try:
+        if local_package:
+            package_path = local_package
+        else:
+            downloader = PubDevDownloader()
+            package_path = downloader.download(flutter_package)
+
+        detected = detect_extension_type(package_path)
+        label = (
+            "UI Control (visual widget)"
+            if detected == "ui_control"
+            else "Service (no visual interface)"
+        )
+        console.print(f"\n  [success]Detected: {label}[/success]\n")
+        return detected
+    except Exception as e:
+        console.print(f"\n  [warning]Auto-detect failed ({e}). Please choose manually:[/warning]")
+        manual_choices = [
+            (1, "Service (no visual interface)"),
+            (2, "UI Control (visual widget)"),
+        ]
+        choice = ask_choice("Extension type:", manual_choices)
+        return "service" if choice == 1 else "ui_control"
+
+
+def _check_existing_packages(project_name: str) -> None:
+    """Check PyPI and GitHub for existing packages with the same name.
+
+    Shows warnings and asks for confirmation when matches are found.
+    Silently continues on network errors.
+    """
+    matches: list[RegistryMatch] = []
+
+    with console.status("[info]Checking PyPI, GitHub and Flet SDK...[/info]"):
+        pypi_match = check_pypi(project_name)
+        if pypi_match:
+            matches.append(pypi_match)
+
+        flet_match = check_flet_packages(project_name)
+        if flet_match:
+            matches.append(flet_match)
+
+        gh_matches = check_github(project_name)
+        matches.extend(gh_matches)
+
+    if not matches:
+        return
+
+    console.print(f"\n  [warning]Found existing packages matching '{project_name}':[/warning]")
+    for m in matches:
+        desc = f" — {m.description}" if m.description else ""
+        console.print(f"    [highlight]{m.source}[/highlight]: {m.name}{desc}")
+        console.print(f"           {m.url}")
+
+    console.print()
+    if not ask_confirm("Continue anyway?"):
+        raise typer.Exit(0)

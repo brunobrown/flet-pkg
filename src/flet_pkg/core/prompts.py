@@ -1,6 +1,6 @@
 from typing import Callable
 
-from rich.prompt import Prompt
+from rich.prompt import Confirm, Prompt
 
 from flet_pkg.ui.console import console
 
@@ -24,6 +24,14 @@ def ask(
             console.print("  [error]This field is required.[/error]")
             continue
         return value
+
+
+def ask_confirm(prompt: str, default: bool = True) -> bool:
+    """Ask a yes/no confirmation question.
+
+    Returns ``True`` for yes, ``False`` for no.
+    """
+    return Confirm.ask(f"[info]?[/info] {prompt}", default=default, console=console)
 
 
 def ask_choice(prompt: str, choices: list[tuple[int, str]]) -> int:

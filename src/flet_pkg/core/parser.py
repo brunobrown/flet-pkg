@@ -1061,6 +1061,33 @@ def _parse_top_level_functions(
 # ---------------------------------------------------------------------------
 
 
+def detect_extension_type(package_path: Path) -> str:
+    """Detect whether a Flutter package is a service or UI control.
+
+    Scans Dart sources for widget classes (StatefulWidget/StatelessWidget).
+    If any are found, returns ``"ui_control"``; otherwise ``"service"``.
+
+    Args:
+        package_path: Path to the extracted Flutter package root.
+
+    Returns:
+        ``"ui_control"`` or ``"service"``.
+    """
+    lib_dir = package_path / "lib"
+    if not lib_dir.exists():
+        return "service"
+
+    widget_pattern = re.compile(
+        r"class\s+\w+\s+extends\s+(?:Stateful|Stateless)Widget",
+    )
+    for dart_file in lib_dir.rglob("*.dart"):
+        content = dart_file.read_text(encoding="utf-8")
+        if widget_pattern.search(content):
+            return "ui_control"
+
+    return "service"
+
+
 def parse_dart_package_api(
     package_path: Path,
     strict: bool = False,
