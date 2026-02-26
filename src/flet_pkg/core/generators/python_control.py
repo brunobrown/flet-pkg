@@ -259,9 +259,16 @@ class PythonControlGenerator(CodeGenerator):
             lines.append(f'        """{doc}."""')
 
         # Build arguments dict using python_name as key (matches Dart side)
+        # For enum-typed params, use .value to serialize
+        enum_names = {e.python_name for e in plan.enums}
         args_dict: dict[str, str] = {}
         for p in method.params:
-            args_dict[p.python_name] = p.python_name
+            base_type = p.python_type.replace("Optional[", "").rstrip("]")
+            base_type = base_type.split("|")[0].strip()
+            if base_type in enum_names:
+                args_dict[p.python_name] = f"{p.python_name}.value"
+            else:
+                args_dict[p.python_name] = p.python_name
 
         if args_dict:
             args_str = ", ".join(f'"{k}": {v}' for k, v in args_dict.items())

@@ -43,6 +43,7 @@ class PackageAnalyzer:
 
     def __init__(self, min_namespace_methods: int = 2):
         self.min_namespace_methods = min_namespace_methods
+        self._known_types: frozenset[str] = frozenset()
 
     def analyze(
         self,
@@ -108,7 +109,7 @@ class PackageAnalyzer:
 
             # Process main classes: extract events, properties, methods
             for cls in main_classes:
-                self._process_main_class(cls, plan, control_name_lower, dart_main_class, api)
+                self._process_main_class(cls, plan, dart_main_class, api)
 
             # Detect sub-object namespaces (e.g., User.pushSubscription → fold into user)
             self._fold_sub_objects(api, namespace_classes, control_name, plan)
@@ -127,36 +128,32 @@ class PackageAnalyzer:
                             plan.events.append(event)
 
                 sub_module = self._build_sub_module(
-                    ns_name, classes, control_name, control_name_lower, dart_main_class, plan
+                    ns_name, classes, control_name, dart_main_class, plan
                 )
                 if sub_module and len(sub_module.methods) >= self.min_namespace_methods:
                     plan.sub_modules.append(sub_module)
                 else:
                     # Not enough methods for a sub-module; merge into main
                     for cls in classes:
-                        self._process_main_class(
-                            cls, plan, control_name_lower, dart_main_class, api
-                        )
+                        self._process_main_class(cls, plan, dart_main_class, api)
 
             # Process top-level functions as main methods
             for func in api.top_level_functions:
-                method_plan = self._build_method_plan(func, "", dart_main_class, dart_main_class)
+                method_plan = self._build_method_plan(func, "", dart_main_class)
                 if not any(m.python_name == method_plan.python_name for m in plan.main_methods):
                     plan.main_methods.append(method_plan)
 
         # Process enums — only keep those that are used or commonly useful
-        used_enums = self._detect_used_enums(api, plan)
         generated_type_names: set[str] = set()
         for dart_enum in api.enums:
-            if dart_enum.name in used_enums or self._is_useful_enum(dart_enum, plan):
-                plan.enums.append(
-                    EnumPlan(
-                        python_name=dart_enum.name,
-                        values=[(v, v.lower()) for v in dart_enum.values],
-                        docstring=dart_enum.docstring,
-                    )
+            plan.enums.append(
+                EnumPlan(
+                    python_name=dart_enum.name,
+                    values=[(v, v.lower()) for v in dart_enum.values],
+                    docstring=dart_enum.docstring,
                 )
-                generated_type_names.add(dart_enum.name)
+            )
+            generated_type_names.add(dart_enum.name)
 
         # Generate stub types for re-exported types from platform_interface
         # that are referenced by methods but not locally defined.
@@ -803,7 +800,6 @@ class PackageAnalyzer:
         self,
         cls: DartClass,
         plan: GenerationPlan,
-        control_name_lower: str,
         dart_main_class: str,
         api: DartPackageAPI | None = None,
     ) -> None:
@@ -864,7 +860,7 @@ class PackageAnalyzer:
                 continue
 
             # Regular method
-            method_plan = self._build_method_plan(method, "", dart_main_class, cls.name)
+            method_plan = self._build_method_plan(method, "", cls.name)
             if not any(m.python_name == method_plan.python_name for m in plan.main_methods):
                 plan.main_methods.append(method_plan)
 
@@ -877,7 +873,6 @@ class PackageAnalyzer:
         ns_name: str,
         classes: list[DartClass],
         control_name: str,
-        control_name_lower: str,
         dart_main_class: str,
         plan: GenerationPlan | None = None,
     ) -> SubModulePlan | None:
@@ -912,9 +907,7 @@ class PackageAnalyzer:
                 # (but keep them in namespace sub-modules for runtime use)
                 if plan and self._is_property_setter(method, plan, in_namespace=True):
                     pass  # Keep in namespace as method
-                method_plan = self._build_method_plan(
-                    method, dart_prefix, dart_sdk_accessor, cls.name
-                )
+                method_plan = self._build_method_plan(method, dart_prefix, cls.name)
                 if not any(m.python_name == method_plan.python_name for m in methods):
                     methods.append(method_plan)
 
@@ -941,7 +934,6 @@ class PackageAnalyzer:
         self,
         method: DartMethod,
         dart_prefix: str,
-        dart_sdk_accessor: str,
         dart_class_name: str,
     ) -> MethodPlan:
         """Convert a DartMethod to a MethodPlan."""
@@ -972,7 +964,7 @@ class PackageAnalyzer:
             python_type = _sanitize_python_type(python_type, self._known_types)
             raw_name = camel_to_snake(p.name) if p.name != p.name.lower() else p.name
             # Normalize param name: strip namespace words, simplify redundant names
-            param_name = _normalize_param_name(raw_name, python_name, dart_prefix)
+            param_name = _normalize_param_name(raw_name)
             params.append(
                 ParamPlan(
                     python_name=param_name,
@@ -1006,23 +998,39 @@ class PackageAnalyzer:
         control_name: str,
         api: DartPackageAPI | None,
     ) -> EventPlan | None:
-        """Detect Stream<T> getters as event sources.
+        """Detect Stream<T> methods/getters as event sources.
 
-        Flutter packages commonly expose ``Stream<T> get onXxxChanged``
-        as event sources. These are converted to ``on_xxx_changed``
-        event handlers on the Python side.
+        Flutter packages commonly expose event sources as either:
+        - ``Stream<T> get onXxxChanged`` (getter with "on" prefix)
+        - ``Stream<T> getPositionStream(...)`` (method returning Stream)
+
+        These are converted to ``on_xxx`` event handlers on the Python side.
         """
-        if not method.is_getter or not method.return_type.startswith("Stream"):
+        if not method.return_type.startswith("Stream"):
             return None
-        if not method.name.startswith("on"):
+
+        # Accept: getters starting with "on", OR any method returning Stream<T>
+        is_on_getter = method.is_getter and method.name.startswith("on")
+        is_stream_method = not method.is_getter and "Stream" in method.return_type
+        if not is_on_getter and not is_stream_method:
             return None
 
         # Extract event type from Stream<T>
         stream_match = re.match(r"Stream<(\w+)\??>?", method.return_type)
         event_type_name = stream_match.group(1) if stream_match else "dynamic"
 
-        # Build event name: onBatteryStateChanged → on_battery_state_changed
-        python_attr = camel_to_snake(method.name)
+        # Build event name
+        if is_on_getter:
+            # onBatteryStateChanged → on_battery_state_changed
+            python_attr = camel_to_snake(method.name)
+        else:
+            # getPositionStream → on_position_stream
+            # getServiceStatusStream → on_service_status_stream
+            snake = camel_to_snake(method.name)
+            # Remove get_ prefix and _stream suffix for cleaner names
+            clean = snake.removeprefix("get_").removesuffix("_stream")
+            python_attr = f"on_{clean}"
+
         if not python_attr.startswith("on_"):
             python_attr = f"on_{python_attr}"
         dart_event_name = python_attr.removeprefix("on_")
@@ -1145,7 +1153,7 @@ class PackageAnalyzer:
         # This prevents matching OnClickInAppMessageListener with event_core="Click"
         # but DOES match OnNotificationPermissionChangeObserver with event_core="Permission"
         m = re.match(
-            r"On(?:[A-Z]\w+?)(" + re.escape(event_core) + r"\w*?)"
+            r"On[A-Z]\w+?(" + re.escape(event_core) + r"\w*?)"
             r"(Observer|Listener|Handler|Change)$",
             cb_type,
         )
@@ -1368,9 +1376,32 @@ class PackageAnalyzer:
         referenced = self._collect_referenced_types(plan)
 
         # Suffixes that indicate enum types
-        _ENUM_SUFFIXES = ("Type", "State", "Status", "Mode", "Level")
+        _ENUM_SUFFIXES = (
+            "Type",
+            "State",
+            "Status",
+            "Mode",
+            "Level",
+            "Source",
+            "Device",
+            "Permission",
+            "Accuracy",
+            "Direction",
+        )
         # Suffixes that indicate data/params classes
-        _DATA_SUFFIXES = ("Params", "Result", "Options", "Configuration", "Config", "Info")
+        _DATA_SUFFIXES = (
+            "Params",
+            "Result",
+            "Options",
+            "Configuration",
+            "Config",
+            "Settings",
+            "Info",
+            "Response",
+            "Position",
+            "Data",
+            "File",
+        )
         # Suffixes to skip (widget/callback types not useful on Python side)
         _SKIP_SUFFIXES = ("Builder", "Delegate", "Callback", "Link", "Target")
 
@@ -1411,6 +1442,21 @@ class PackageAnalyzer:
                     )
                 )
                 generated_type_names.add(type_name)
+            elif type_name in referenced:
+                # Fallback: generate as enum stub for any referenced type
+                # that didn't match known suffixes (e.g. LocationPermission,
+                # ImageSource, XFile). This prevents NameError at runtime.
+                plan.enums.append(
+                    EnumPlan(
+                        python_name=type_name,
+                        values=[("UNKNOWN", "unknown")],
+                        docstring=(
+                            f"{type_name} enum (stub — values should be filled "
+                            f"from the {_source_pkg} platform interface)."
+                        ),
+                    )
+                )
+                generated_type_names.add(type_name)
 
     def _generate_local_data_classes(
         self,
@@ -1427,7 +1473,19 @@ class PackageAnalyzer:
         referenced = self._collect_referenced_types(plan)
 
         # Data class suffixes (these helper classes have useful fields)
-        _DATA_SUFFIXES = ("Configuration", "Config", "Options", "Params", "Info", "Result")
+        _DATA_SUFFIXES = (
+            "Configuration",
+            "Config",
+            "Settings",
+            "Options",
+            "Params",
+            "Info",
+            "Result",
+            "Response",
+            "Position",
+            "Data",
+            "File",
+        )
         # Event suffixes should not be generated as data classes
         _SKIP_SUFFIXES = ("Event", "State", "ChangedState")
 
@@ -1488,50 +1546,6 @@ class PackageAnalyzer:
                 if base_dart and base_dart[0].isupper():
                     refs.add(base_dart)
         return refs
-
-    # ------------------------------------------------------------------
-    # Enum filtering
-    # ------------------------------------------------------------------
-
-    def _detect_used_enums(self, api: DartPackageAPI, plan: GenerationPlan) -> set[str]:
-        """Detect enums that are referenced by methods, properties, or plan."""
-        used: set[str] = set()
-        enum_names = {e.name for e in api.enums}
-
-        # Check all class method params and return types
-        for cls in api.classes:
-            for method in cls.methods:
-                if method.return_type in enum_names:
-                    used.add(method.return_type)
-                for p in method.params:
-                    if p.dart_type in enum_names:
-                        used.add(p.dart_type)
-
-        # Check top-level function params and return types
-        for func in api.top_level_functions:
-            if func.return_type in enum_names:
-                used.add(func.return_type)
-            for p in func.params:
-                if p.dart_type in enum_names:
-                    used.add(p.dart_type)
-
-        # Check plan properties for enum type references
-        for prop in plan.properties:
-            for enum_name in enum_names:
-                if enum_name in prop.python_type:
-                    used.add(enum_name)
-
-        return used
-
-    def _is_useful_enum(self, dart_enum, plan: GenerationPlan) -> bool:
-        """Check if an enum is likely useful for the generated extension.
-
-        Includes enums used for configuration, status reporting, or
-        mode selection — these are commonly part of the public API.
-        """
-        # All locally-defined enums are useful (the parser already
-        # filters out private/internal ones)
-        return True
 
     # ------------------------------------------------------------------
     # Helper checks
@@ -1598,11 +1612,7 @@ def _normalize_event_class_name(name: str) -> str:
     return name + "Event"
 
 
-def _normalize_param_name(
-    param_name: str,
-    method_name: str,
-    namespace: str,
-) -> str:
+def _normalize_param_name(param_name: str) -> str:
     """Normalize parameter names — keep original Dart names (camel_to_snake).
 
     Minimal normalization: the direct ``camel_to_snake`` mapping from Dart
