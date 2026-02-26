@@ -460,6 +460,74 @@ class TestRiveLikeWidgetParsing:
         assert prop.python_type == "ft.BoxFit | None"
 
 
+class TestEnumLikeSuffixHeuristic:
+    """Tests that unknown types with enum-like suffixes map to str, not dict."""
+
+    def test_rive_hit_test_behavior_maps_to_str(self, analyzer):
+        """RiveHitTestBehavior (enum from transitive dep) → str | None."""
+        api = DartPackageAPI(
+            classes=[
+                DartClass(
+                    name="RiveWidget",
+                    constructor_params=[
+                        DartParam(name="hitTestBehavior", dart_type="RiveHitTestBehavior"),
+                    ],
+                ),
+            ]
+        )
+        plan = analyzer.analyze(api, "Rive", "ui_control", "rive", "flet_rive")
+        prop = next(p for p in plan.properties if p.python_name == "hit_test_behavior")
+        assert prop.python_type == "str | None"
+
+    def test_custom_mode_enum_maps_to_str(self, analyzer):
+        """Types ending in 'Mode' should map to str."""
+        api = DartPackageAPI(
+            classes=[
+                DartClass(
+                    name="MyWidget",
+                    constructor_params=[
+                        DartParam(name="renderMode", dart_type="CustomRenderMode"),
+                    ],
+                ),
+            ]
+        )
+        plan = analyzer.analyze(api, "MyWidget", "ui_control", "my_pkg", "flet_my")
+        prop = next(p for p in plan.properties if p.python_name == "render_mode")
+        assert prop.python_type == "str | None"
+
+    def test_custom_style_enum_maps_to_str(self, analyzer):
+        """Types ending in 'Style' should map to str."""
+        api = DartPackageAPI(
+            classes=[
+                DartClass(
+                    name="MyWidget",
+                    constructor_params=[
+                        DartParam(name="lineStyle", dart_type="CustomLineStyle"),
+                    ],
+                ),
+            ]
+        )
+        plan = analyzer.analyze(api, "MyWidget", "ui_control", "my_pkg", "flet_my")
+        prop = next(p for p in plan.properties if p.python_name == "line_style")
+        assert prop.python_type == "str | None"
+
+    def test_unknown_class_without_enum_suffix_stays_dict(self, analyzer):
+        """Unknown types without enum suffix should still become dict | None."""
+        api = DartPackageAPI(
+            classes=[
+                DartClass(
+                    name="MyWidget",
+                    constructor_params=[
+                        DartParam(name="options", dart_type="CustomOptions"),
+                    ],
+                ),
+            ]
+        )
+        plan = analyzer.analyze(api, "MyWidget", "ui_control", "my_pkg", "flet_my")
+        prop = next(p for p in plan.properties if p.python_name == "options")
+        assert prop.python_type == "dict | None"
+
+
 class TestFallback:
     def test_empty_api(self, analyzer):
         api = DartPackageAPI()

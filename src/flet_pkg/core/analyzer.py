@@ -1722,6 +1722,29 @@ def _normalize_method_name(
     return python_name, dart_method_name
 
 
+# Suffixes that strongly indicate a Dart enum type.  When an unknown type
+# ends with one of these, ``_sanitize_python_type`` maps it to ``str``
+# (serialised as a string on the wire) instead of ``dict | None``.
+# This handles enums from transitive dependencies that the parser never
+# downloads (e.g. ``RiveHitTestBehavior`` from ``rive_native``).
+_ENUM_LIKE_SUFFIXES = (
+    "Behavior",
+    "Behaviour",
+    "Mode",
+    "Style",
+    "Kind",
+    "Fit",
+    "Order",
+    "Level",
+    "Direction",
+    "Action",
+    "Axis",
+    "Clip",
+    "Curve",
+    "Cap",
+    "Join",
+)
+
 # Python types that are valid and should not be replaced
 _KNOWN_PYTHON_TYPES = frozenset(
     {
@@ -1781,6 +1804,11 @@ def _sanitize_python_type(
     # Re-exported public API types — keep them
     if base in known_types:
         return python_type
+
+    # If the type name ends with a common enum suffix, treat as str
+    # (enums from transitive deps that weren't downloaded/parsed).
+    if base and base[0].isupper() and base.endswith(_ENUM_LIKE_SUFFIXES):
+        return "str | None" if is_nullable else "str"
 
     # If it looks like a Dart class name (UpperCase), replace with dict
     if base and base[0].isupper() and base.isidentifier():
