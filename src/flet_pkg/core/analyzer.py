@@ -24,7 +24,12 @@ from flet_pkg.core.models import (
     SubModulePlan,
 )
 from flet_pkg.core.parser import camel_to_snake, parse_dart_package_api
-from flet_pkg.core.type_map import map_dart_type, map_return_type
+from flet_pkg.core.type_map import (
+    get_flet_dart_getter,
+    map_dart_type,
+    map_dart_type_flet,
+    map_return_type,
+)
 
 
 class PackageAnalyzer:
@@ -344,6 +349,14 @@ class PackageAnalyzer:
         "ShapeBorder",
         "BoxBorder",
         "TextStyle",
+        # Controller types (complex objects, not properties)
+        "AnimationController",
+        "ScrollController",
+        "TextEditingController",
+        # Cursor / hit-test types
+        "MouseCursor",
+        "SystemMouseCursors",
+        "HitTestBehavior",
     }
 
     def _process_widget_classes(
@@ -407,6 +420,9 @@ class PackageAnalyzer:
             # Skip non-serializable Flutter types
             if base_type in self._NON_SERIALIZABLE_TYPES:
                 continue
+            # Skip any Controller or Painter subtype (complex objects)
+            if "Controller" in base_type or base_type.endswith("Painter"):
+                continue
 
             # Check if this type references a package helper class
             if base_type in helper_map:
@@ -419,17 +435,36 @@ class PackageAnalyzer:
                 if inner_type in helper_map:
                     referenced_helpers.add(inner_type)
 
-            # Convert to Python property
+            # Convert to Python property (Flet-aware for ui_control)
             python_name = camel_to_snake(param.name)
-            python_type = map_dart_type(param.dart_type)
+            is_ui = plan.base_class != "ft.Service"
+
+            if is_ui:
+                python_type = map_dart_type_flet(param.dart_type)
+                # None means "skip this property" (e.g. Key)
+                if python_type is None:
+                    continue
+            else:
+                python_type = map_dart_type(param.dart_type)
+
             python_type = _sanitize_python_type(python_type, self._known_types)
 
             # Determine default value
             default_value = CodeGenerator._py_default(param.default)
+
+            # Use field(default_factory=list) for list types (before nullable logic)
+            if python_type.startswith("list[") and default_value in ("None", '""'):
+                default_value = "field(default_factory=list)"
+
             # In Flet controls, all properties are dataclass fields and need
             # defaults. If default is None, the type must be nullable.
             if default_value == "None" and "None" not in python_type:
                 python_type = f"{python_type} | None"
+
+            # Compute Dart getter expression for UI controls
+            dart_getter = ""
+            if is_ui:
+                dart_getter = get_flet_dart_getter(python_type, python_name)
 
             # Skip duplicate properties
             if any(p.python_name == python_name for p in plan.properties):
@@ -441,6 +476,7 @@ class PackageAnalyzer:
                     python_type=python_type,
                     default_value=default_value,
                     docstring="",
+                    dart_getter=dart_getter,
                 )
             )
 
@@ -477,19 +513,46 @@ class PackageAnalyzer:
             )
             generated_names.add(helper_name)
 
+    # Suffixes that indicate internal/non-user-facing widget classes.
+    _INTERNAL_WIDGET_SUFFIXES = (
+        "SharedTexture",
+        "Renderer",
+        "Controller",
+        "State",
+        "Painter",
+        "Delegate",
+        "Builder",
+    )
+
     def _select_main_widget(self, widget_classes: list[DartClass], control_name: str) -> DartClass:
-        """Select the best-matching widget class for the control name."""
+        """Select the best-matching widget class for the control name.
+
+        Filters out private Dart classes (``_Foo``) and internal helper
+        widgets (e.g. ``SharedTexture``, ``Renderer``, ``Controller``).
+        """
         control_lower = control_name.lower()
+
+        # Filter out internal/private widget classes
+        filtered = [
+            cls
+            for cls in widget_classes
+            if not cls.name.startswith("_")
+            and not any(cls.name.endswith(suffix) for suffix in self._INTERNAL_WIDGET_SUFFIXES)
+        ]
+        # Fallback to unfiltered if everything got excluded
+        if not filtered:
+            filtered = widget_classes
+
         # Priority 1: Exact name match
-        for cls in widget_classes:
+        for cls in filtered:
             if cls.name.lower() == control_lower:
                 return cls
         # Priority 2: Name contains control name
-        for cls in widget_classes:
+        for cls in filtered:
             if control_lower in cls.name.lower():
                 return cls
         # Priority 3: Most constructor params (richest API)
-        return max(widget_classes, key=lambda c: len(c.constructor_params))
+        return max(filtered, key=lambda c: len(c.constructor_params))
 
     # ------------------------------------------------------------------
     # Main SDK class detection

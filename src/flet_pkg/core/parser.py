@@ -88,6 +88,23 @@ UI_CLASS_SUFFIXES = (
     "Positioned",
 )
 
+# Suffixes that indicate internal widgets (not user-facing) when parsing
+# widget classes for ui_control extensions.  "Widget" is intentionally
+# excluded — many packages name their main user-facing class FooWidget
+# (e.g. RiveWidget, VideoWidget).  UI_CLASS_SUFFIXES is still used by
+# _should_skip_class() for the service path.
+_INTERNAL_WIDGET_SUFFIXES = (
+    "Delegate",
+    "Painter",
+    "Positioned",
+    "Manager",
+    "Guard",
+    "Internal",
+    "Private",
+    "Impl",
+    "Utils",
+)
+
 # Parent classes that indicate a platform implementation (not a public API).
 # Classes extending these are skipped entirely.
 PLATFORM_IMPL_BASES = (
@@ -1186,8 +1203,11 @@ def parse_dart_package_api(
             # Widget classes: include when building ui_control extensions
             is_widget = parent_class in WIDGET_BASES
             if is_widget and include_widgets:
-                # Skip widgets with internal-looking suffixes
-                if class_name.endswith(UI_CLASS_SUFFIXES):
+                # Skip widgets with internal-looking suffixes.
+                # Uses a reduced set that intentionally excludes "Widget" —
+                # many packages name their main user-facing class FooWidget
+                # (e.g. RiveWidget, VideoWidget).
+                if class_name.endswith(_INTERNAL_WIDGET_SUFFIXES):
                     continue
                 ctor_params = _parse_constructor_params(class_name, class_block)
                 if ctor_params:

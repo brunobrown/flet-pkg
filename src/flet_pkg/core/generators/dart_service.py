@@ -17,9 +17,14 @@ class DartServiceGenerator(CodeGenerator):
     def generate(self, plan: GenerationPlan) -> dict[str, str]:
         control_snake = plan.control_name_snake or camel_to_snake(plan.control_name)
         service_type = "Service" if plan.base_class == "ft.Service" else "Widget"
-        class_name = f"{plan.control_name}{service_type}"
         filename = f"{control_snake}_{service_type.lower()}.dart"
 
+        # UI controls use StatefulWidget + LayoutControl pattern
+        if service_type == "Widget":
+            return {filename: self._generate_ui_control(plan, control_snake)}
+
+        # Service path — unchanged
+        class_name = f"{plan.control_name}{service_type}"
         lines: list[str] = []
 
         # Imports
@@ -99,6 +104,101 @@ class DartServiceGenerator(CodeGenerator):
         lines.append("")
 
         return {filename: "\n".join(lines)}
+
+    # ------------------------------------------------------------------
+    # UI Control: StatefulWidget + LayoutControl
+    # ------------------------------------------------------------------
+
+    def _generate_ui_control(self, plan: GenerationPlan, control_snake: str) -> str:
+        """Generate a StatefulWidget Dart file for UI control extensions.
+
+        Produces a ``StatefulWidget`` whose ``build()`` reads properties
+        using typed getters (``getAlignment``, ``getBoxFit``, etc.) and
+        wraps the SDK widget in a ``LayoutControl``.
+        """
+        widget_class = f"{plan.control_name}Widget"
+        state_class = f"_{plan.control_name}WidgetState"
+        sdk_class = plan.dart_main_class or plan.control_name
+        lines: list[str] = []
+
+        # Imports
+        lines.append("import 'package:flet/flet.dart';")
+        lines.append("import 'package:flutter/widgets.dart';")
+        if plan.dart_import:
+            lines.append(f"import '{plan.dart_import}';")
+        lines.append("")
+
+        # StatefulWidget class
+        lines.append(f"/// {plan.control_name} widget implementation for Flet.")
+        lines.append("///")
+        lines.append(f"/// Wraps the {plan.flutter_package} Flutter widget in a LayoutControl.")
+        lines.append(f"class {widget_class} extends StatefulWidget {{")
+        lines.append("  final Control control;")
+        lines.append(f"  const {widget_class}({{super.key, required this.control}});")
+        lines.append("")
+        lines.append("  @override")
+        lines.append(f"  State<{widget_class}> createState() => {state_class}();")
+        lines.append("}")
+        lines.append("")
+
+        # State class
+        lines.append(f"class {state_class} extends State<{widget_class}> {{")
+
+        # build()
+        lines.append("  @override")
+        lines.append("  Widget build(BuildContext context) {")
+        lines.append("    try {")
+
+        # Read properties using typed getters
+        if plan.properties:
+            for prop in plan.properties:
+                dart_var = _to_camel_case(prop.python_name)
+                if prop.dart_getter:
+                    # Use the pre-computed typed getter from the analyzer
+                    getter_expr = prop.dart_getter.replace("control.", "widget.control.")
+                    # buildWidget/buildWidgets don't need widget. prefix
+                    if getter_expr.startswith("buildWidget"):
+                        getter_expr = prop.dart_getter
+                    lines.append(f"      final {dart_var} = {getter_expr};")
+                else:
+                    # Fallback to getString
+                    lines.append(
+                        f'      final {dart_var} = widget.control.getString("{prop.python_name}");'
+                    )
+            lines.append("")
+
+        # Build SDK widget constructor args
+        lines.append("      return LayoutControl(")
+        lines.append("        control: widget.control,")
+        lines.append(f"        child: {sdk_class}(")
+        for prop in plan.properties:
+            dart_var = _to_camel_case(prop.python_name)
+            # Use the original Dart param name for the constructor
+            lines.append(f"          {prop.python_name}: {dart_var},")
+        lines.append("        ),")
+        lines.append("      );")
+
+        # Error handling
+        lines.append("    } catch (error, stackTrace) {")
+        lines.append("      _handleError(error, stackTrace);")
+        lines.append("      return const SizedBox.shrink();")
+        lines.append("    }")
+        lines.append("  }")
+        lines.append("")
+
+        # _handleError
+        lines.append("  void _handleError(Object error, StackTrace stackTrace) {")
+        lines.append(f'    debugPrint("{widget_class} ERROR: $error");')
+        lines.append('    widget.control.triggerEvent("error", {')
+        lines.append('      "message": error.toString(),')
+        lines.append('      "stack_trace": stackTrace.toString(),')
+        lines.append("    });")
+        lines.append("  }")
+
+        lines.append("}")
+        lines.append("")
+
+        return "\n".join(lines)
 
     # ------------------------------------------------------------------
     # Initialize method

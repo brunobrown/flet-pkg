@@ -3,6 +3,10 @@ Dart-to-Python type mapping.
 
 Converts Dart type annotations to their Python equivalents,
 handling nullable types, generics, and common Flutter types.
+
+Also provides Flet-aware mappings for UI controls that use native
+Flet types (``ft.Alignment``, ``ft.BoxFit``, etc.) and typed Dart
+getters (``getAlignment``, ``getBoxFit``, etc.).
 """
 
 from __future__ import annotations
@@ -63,6 +67,37 @@ _TYPE_MAP: dict[str, str] = {
     "Brightness": "str",
     "TabBarIndicatorSize": "str",
     "FloatingLabelBehavior": "str",
+}
+
+# Flet-aware type mappings: Dart type -> Python type using native Flet types.
+# Used by ``map_dart_type_flet()`` for UI control extensions.
+_FLET_TYPE_MAP: dict[str, str | None] = {
+    "Alignment": "ft.Alignment",
+    "AlignmentGeometry": "ft.Alignment",
+    "AlignmentDirectional": "ft.Alignment",
+    "BoxFit": "ft.BoxFit",
+    "Fit": "ft.BoxFit",  # rive package uses Fit instead of BoxFit
+    "Rect": "ft.Rect",
+    "Color": "ft.Color",
+    "double": "ft.Number",
+    "num": "ft.Number",
+    "Widget": "ft.Control",
+    "Key": None,  # skip — not a user-facing property
+}
+
+# Mapping from Python type -> Dart getter expression.
+# ``{name}`` is replaced with the actual property name at generation time.
+_FLET_DART_GETTER_MAP: dict[str, str] = {
+    "ft.Alignment": 'control.getAlignment("{name}")',
+    "ft.BoxFit": 'control.getBoxFit("{name}")',
+    "ft.Rect": 'control.getRect("{name}")',
+    "ft.Color": 'control.getString("{name}")',
+    "ft.Number": 'control.getDouble("{name}")',
+    "ft.Control": 'buildWidget("{name}")',
+    "bool": 'control.getBool("{name}", false)!',
+    "int": 'control.getInt("{name}")',
+    "float": 'control.getDouble("{name}")',
+    "str": 'control.getString("{name}")',
 }
 
 # Regex to extract generic type parameters: e.g. List<String> -> ("List", "String")
@@ -185,3 +220,98 @@ def _split_generic_params(params_str: str) -> list[str]:
     if current:
         parts.append("".join(current).strip())
     return parts
+
+
+# ------------------------------------------------------------------
+# Flet-aware mapping (for UI controls)
+# ------------------------------------------------------------------
+
+
+def map_dart_type_flet(dart_type: str) -> str | None:
+    """Map a Dart type to its Flet-aware Python equivalent.
+
+    Consults ``_FLET_TYPE_MAP`` first for native Flet types (e.g.
+    ``Alignment`` → ``ft.Alignment``), then falls back to
+    ``map_dart_type()``.
+
+    Returns ``None`` when the type should be skipped entirely (e.g.
+    ``Key``).
+    """
+    dart_type = dart_type.strip()
+    if not dart_type:
+        return "Any"
+
+    # Handle nullable
+    nullable_match = _NULLABLE_RE.match(dart_type)
+    if nullable_match:
+        inner = map_dart_type_flet(nullable_match.group(1))
+        if inner is None:
+            return None
+        return f"{inner} | None"
+
+    # Handle generics
+    generic_match = _GENERIC_RE.match(dart_type)
+    if generic_match:
+        outer = generic_match.group(1)
+        inner_raw = generic_match.group(2)
+
+        # Future<T> → unwrap to T
+        if outer == "Future":
+            return map_dart_type_flet(inner_raw)
+
+        inner_types = _split_generic_params(inner_raw)
+        mapped = []
+        for t in inner_types:
+            m = map_dart_type_flet(t)
+            if m is None:
+                return None
+            mapped.append(m)
+        mapped_inner = ", ".join(mapped)
+
+        if outer == "List":
+            return f"list[{mapped_inner}]"
+        if outer == "Set":
+            return f"set[{mapped_inner}]"
+        if outer == "Map":
+            return f"dict[{mapped_inner}]"
+        if outer == "Iterable":
+            return f"list[{mapped_inner}]"
+
+        mapped_outer = _FLET_TYPE_MAP.get(outer)
+        if mapped_outer is None and outer in _FLET_TYPE_MAP:
+            return None  # explicitly skipped
+        if mapped_outer is None:
+            mapped_outer = _TYPE_MAP.get(outer, outer)
+        return f"{mapped_outer}[{mapped_inner}]"
+
+    # Flet type lookup (may return None for skipped types)
+    if dart_type in _FLET_TYPE_MAP:
+        return _FLET_TYPE_MAP[dart_type]
+
+    # Fallback to standard mapping
+    return map_dart_type(dart_type)
+
+
+def get_flet_dart_getter(python_type: str, prop_name: str) -> str:
+    """Return the Dart getter expression for a Flet property.
+
+    Args:
+        python_type: The mapped Python type (e.g. ``"ft.Alignment"``).
+        prop_name: The property name (e.g. ``"alignment"``).
+
+    Returns:
+        A Dart expression string like ``control.getAlignment("alignment")``.
+        Falls back to ``control.getString("{prop_name}")`` for unknown types.
+    """
+    # Strip nullable and list wrappers for lookup
+    base = python_type.replace(" | None", "").strip()
+
+    # Handle list types: list[ft.Control] → buildWidgets("{name}")
+    if base.startswith("list["):
+        inner = base[5:-1]
+        if inner == "ft.Control":
+            return f'buildWidgets("{prop_name}")'
+        return f'control.getString("{prop_name}")'
+
+    template = _FLET_DART_GETTER_MAP.get(base, 'control.getString("{name}")')
+    return template.replace("{name}", prop_name)

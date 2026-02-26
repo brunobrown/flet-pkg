@@ -134,6 +134,12 @@ class PropertyPlan:
     Use ``{var}`` placeholder for the variable name.
     Example: ``"OneSignal.Debug.setLogLevel(OSLogLevel.values[{var}]);"``
     """
+    dart_getter: str = ""
+    """Dart getter expression for UI controls.
+
+    Example: ``control.getAlignment("alignment")``.
+    Populated by the analyzer for ``ui_control`` extensions.
+    """
 
 
 @dataclass

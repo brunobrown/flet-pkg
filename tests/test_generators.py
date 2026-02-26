@@ -261,3 +261,138 @@ class TestDartServiceGenerator:
         files = gen.generate(sample_plan)
         content = files["one_signal_service.dart"]
         assert "package:onesignal_flutter/onesignal_flutter.dart" in content
+
+
+class TestDartUIControlGenerator:
+    """Tests for StatefulWidget generation for UI controls."""
+
+    @pytest.fixture
+    def ui_plan(self):
+        return GenerationPlan(
+            control_name="Rive",
+            package_name="flet_rive",
+            base_class="ft.LayoutControl",
+            flutter_package="rive",
+            dart_import="package:rive/rive.dart",
+            dart_main_class="RiveAnimation",
+            properties=[
+                PropertyPlan(
+                    python_name="fit",
+                    python_type="ft.BoxFit | None",
+                    default_value="None",
+                    dart_getter='control.getBoxFit("fit")',
+                ),
+                PropertyPlan(
+                    python_name="alignment",
+                    python_type="ft.Alignment | None",
+                    default_value="None",
+                    dart_getter='control.getAlignment("alignment")',
+                ),
+                PropertyPlan(
+                    python_name="antialiasing",
+                    python_type="bool",
+                    default_value="True",
+                    dart_getter='control.getBool("antialiasing", false)!',
+                ),
+            ],
+            events=[
+                EventPlan(
+                    python_attr_name="on_init",
+                    event_class_name="RiveOnInitEvent",
+                    dart_event_name="init",
+                ),
+            ],
+        )
+
+    def test_generates_widget_file(self, ui_plan):
+        gen = DartServiceGenerator()
+        files = gen.generate(ui_plan)
+        assert "rive_widget.dart" in files
+
+    def test_contains_stateful_widget(self, ui_plan):
+        gen = DartServiceGenerator()
+        files = gen.generate(ui_plan)
+        content = files["rive_widget.dart"]
+        assert "class RiveWidget extends StatefulWidget" in content
+
+    def test_contains_state_class(self, ui_plan):
+        gen = DartServiceGenerator()
+        files = gen.generate(ui_plan)
+        content = files["rive_widget.dart"]
+        assert "class _RiveWidgetState extends State<RiveWidget>" in content
+
+    def test_contains_layout_control(self, ui_plan):
+        gen = DartServiceGenerator()
+        files = gen.generate(ui_plan)
+        content = files["rive_widget.dart"]
+        assert "LayoutControl(" in content
+        assert "control: widget.control," in content
+
+    def test_contains_sdk_widget(self, ui_plan):
+        gen = DartServiceGenerator()
+        files = gen.generate(ui_plan)
+        content = files["rive_widget.dart"]
+        assert "RiveAnimation(" in content
+
+    def test_contains_typed_getters(self, ui_plan):
+        gen = DartServiceGenerator()
+        files = gen.generate(ui_plan)
+        content = files["rive_widget.dart"]
+        assert "getBoxFit" in content
+        assert "getAlignment" in content
+        assert "getBool" in content
+
+    def test_contains_error_handler(self, ui_plan):
+        gen = DartServiceGenerator()
+        files = gen.generate(ui_plan)
+        content = files["rive_widget.dart"]
+        assert "_handleError" in content
+        assert 'triggerEvent("error"' in content
+
+    def test_contains_flutter_widgets_import(self, ui_plan):
+        gen = DartServiceGenerator()
+        files = gen.generate(ui_plan)
+        content = files["rive_widget.dart"]
+        assert "package:flutter/widgets.dart" in content
+
+    def test_no_flet_widget_base_class(self, ui_plan):
+        gen = DartServiceGenerator()
+        files = gen.generate(ui_plan)
+        content = files["rive_widget.dart"]
+        assert "FletWidget" not in content
+
+
+class TestPythonControlFieldImport:
+    """Tests for field(default_factory) import in python_control.py."""
+
+    def test_field_import_for_list_property(self):
+        plan = GenerationPlan(
+            control_name="MyWidget",
+            package_name="flet_my_widget",
+            base_class="ft.LayoutControl",
+            properties=[
+                PropertyPlan(
+                    python_name="items",
+                    python_type="list[str]",
+                    default_value="field(default_factory=list)",
+                ),
+            ],
+        )
+        gen = PythonControlGenerator()
+        files = gen.generate(plan)
+        content = files["my_widget.py"]
+        assert "from dataclasses import field" in content
+
+    def test_no_field_import_without_list_or_submodules(self):
+        plan = GenerationPlan(
+            control_name="MyWidget",
+            package_name="flet_my_widget",
+            base_class="ft.LayoutControl",
+            properties=[
+                PropertyPlan(python_name="name", python_type="str", default_value='""'),
+            ],
+        )
+        gen = PythonControlGenerator()
+        files = gen.generate(plan)
+        content = files["my_widget.py"]
+        assert "from dataclasses import field" not in content

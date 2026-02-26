@@ -31,7 +31,10 @@ class PythonControlGenerator(CodeGenerator):
         # Imports
         is_service = plan.base_class == "ft.Service"
         lines.append("")
-        if plan.sub_modules:
+        needs_field = bool(plan.sub_modules) or any(
+            p.default_value.startswith("field(") for p in plan.properties
+        )
+        if needs_field:
             lines.append("from dataclasses import field")
 
         # Only import Any when needed (service _invoke_method or method signatures)
