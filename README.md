@@ -1,8 +1,16 @@
-# flet-pkg
+# Flet PKG
 
 CLI tool to scaffold Flet extension packages.
 
 Generates complete, ready-to-develop Flet extensions with Python + Flutter/Dart code, following Flet 0.80.x+ patterns.
+
+![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white)
+![Flet](https://img.shields.io/badge/Flet-0.80.0+-00B4D8?style=for-the-badge&logo=flutter&logoColor=white)
+![CI-MAIN](https://img.shields.io/badge/ci|main-passing-brightgreen?style=for-the-badge)
+![CI-DEV](https://img.shields.io/badge/ci|dev-passing-brightgreen?style=for-the-badge)
+![Docs](https://img.shields.io/badge/https%3A%2F%2Fimg.shields.io%2Fbadge%2Fdocs-mkdocs-blue?style=for-the-badge&label=Docs)
+![Downloads](https://img.shields.io/badge/https%3A%2F%2Fstatic.pepy.tech%2Fpersonalized-badge%2Fflet-onesignal%3Fperiod%3Dmonthly%26units%3DINTERNATIONAL_SYSTEM%26left_color%3DGREY%26right_color%3DBLUE%26left_text%3Ddownloads%252Fmonth?style=for-the-badge&label=Downloads%2FMonth)
+![License](https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge)
 
 ## Installation
 
@@ -44,13 +52,20 @@ Walks you through creating a new extension with prompts for extension type, Flut
 ### Non-interactive mode
 
 ```bash
-flet-pkg create --type service --flutter-package onesignal_flutter --output .
+flet-pkg create --type auto --flutter-package onesignal_flutter --output .
 ```
 
 ### Extension types
 
-- **Service** — Non-visual extension (`ft.Service`), e.g. push notifications, analytics
-- **UI Control** — Visual widget (`ft.LayoutControl`), e.g. maps, charts, custom widgets
+| Option | Description |
+|--------|-------------|
+| **Auto-detect** (default) | Downloads the Flutter package and detects the type automatically |
+| **Service** | Non-visual extension (`ft.Service`), e.g. push notifications, analytics |
+| **UI Control** | Visual widget (`ft.LayoutControl`), e.g. maps, charts, custom widgets |
+
+### Name conflict detection
+
+After you choose the extension name, `flet-pkg` checks **PyPI**, **GitHub**, and the **Flet SDK monorepo** for existing packages with the same name. If matches are found, you'll see a warning with links and a confirmation prompt before continuing.
 
 ### Generated project structure
 

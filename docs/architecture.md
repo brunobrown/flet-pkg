@@ -5,30 +5,37 @@ How `flet-pkg` works internally.
 ## Overview
 
 ```
-CLI (Typer) → Prompts (Rich) → Validators → Scaffolder (Jinja2) → Output
+CLI (Typer) → Prompts (Rich) → Validators → Registry Check → Scaffolder (Jinja2) → Pipeline → Output
 ```
 
 ## Module structure
 
 ```
 src/flet_pkg/
-├── __init__.py          # Version and app name
-├── __main__.py          # python -m flet_pkg support
-├── main.py              # Typer app, version callback
+├── __init__.py              # Version and app name
+├── __main__.py              # python -m flet_pkg support
+├── main.py                  # Typer app, version callback
 ├── commands/
-│   └── create.py        # Create command logic
+│   └── create.py            # Create command logic
 ├── core/
-│   ├── parser.py        # Dart API parser
-│   ├── prompts.py       # Rich interactive prompts
-│   ├── scaffolder.py    # Jinja2 template engine
-│   └── validators.py    # Name validation + derivation
+│   ├── analyzer.py          # PackageAnalyzer → GenerationPlan
+│   ├── downloader.py        # PubDevDownloader (pub.dev cache)
+│   ├── generators/          # Code generators (Python + Dart)
+│   ├── models.py            # DartPackageAPI, GenerationPlan
+│   ├── parser.py            # Dart API parser + detect_extension_type()
+│   ├── pipeline.py          # GenerationPipeline orchestrator
+│   ├── prompts.py           # Rich interactive prompts (ask, ask_confirm, ask_choice)
+│   ├── registry_checker.py  # PyPI, GitHub, Flet SDK name conflict check
+│   ├── scaffolder.py        # Jinja2 template engine
+│   ├── type_map.py          # Dart → Python type mapping
+│   └── validators.py        # Name validation + derivation
 ├── ui/
-│   ├── console.py       # Rich console instance
-│   ├── panels.py        # Header, info, error panels
-│   └── tree.py          # Project tree display
+│   ├── console.py           # Rich console instance
+│   ├── panels.py            # Header, info, error panels
+│   └── tree.py              # Project tree display
 └── templates/
-    ├── service/         # Service extension template
-    └── ui_control/      # UI Control extension template
+    ├── service/             # Service extension template
+    └── ui_control/          # UI Control extension template
 ```
 
 ## Key components
@@ -41,11 +48,23 @@ The entry point registers the `create` command and a `--version` callback. Uses 
 
 Orchestrates the creation flow:
 
-1. Determines extension type (from flag or interactive prompt)
+1. Determines extension type (from flag or interactive prompt). If `auto`, downloads the Flutter package and calls `detect_extension_type()` to resolve it.
 2. Collects Flutter package name, project name, package name, control class name
 3. Calls `derive_names()` to auto-suggest names
-4. Builds a context dict and passes it to `Scaffolder`
-5. Displays the generated project tree
+4. Checks PyPI, GitHub, and Flet SDK monorepo for name conflicts via `registry_checker`
+5. Builds a context dict and passes it to `Scaffolder`
+6. Runs the analysis pipeline (download → parse → analyze → generate)
+7. Displays the generated project tree
+
+### Registry checker (`core/registry_checker.py`)
+
+Checks for existing packages with the same name before scaffolding:
+
+- **PyPI** — `GET https://pypi.org/pypi/{name}/json` (200 = exists)
+- **Flet SDK** — checks `flet-dev/flet` monorepo at `sdk/python/packages/{name}` via GitHub Contents API
+- **GitHub** — searches repositories matching the name (top 3 results)
+
+All checks fail silently on network errors to avoid blocking the flow.
 
 ### Validators (`core/validators.py`)
 

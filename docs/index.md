@@ -7,7 +7,9 @@ Generates complete, ready-to-develop Flet extensions with Python + Flutter/Dart 
 ## Features
 
 - **Interactive & non-interactive modes** — guided prompts or full CLI flags
-- **Two extension types** — Service (non-visual) and UI Control (visual widget)
+- **Auto-detect extension type** — downloads the Flutter package and detects whether it's a Service or UI Control automatically
+- **Three extension types** — Auto-detect (recommended), Service (non-visual), and UI Control (visual widget)
+- **Name conflict detection** — checks PyPI, GitHub, and the Flet SDK monorepo before creating, warns if the name already exists
 - **Complete project scaffolding** — Python package, Flutter package, tests, docs, examples
 - **Smart name derivation** — automatically derives project, package, and class names from the Flutter package name
 - **Flet 0.80.x+ patterns** — uses `@ft.control`, `ft.Service`, `ft.LayoutControl`, `invoke_method`, and `EventHandler`
@@ -32,7 +34,13 @@ flet-pkg create
 
 This walks you through creating a new Flet extension with interactive prompts.
 
-For non-interactive usage:
+For non-interactive usage (auto-detect type):
+
+```bash
+flet-pkg create --type auto --flutter-package onesignal_flutter --output .
+```
+
+Or specify the type explicitly:
 
 ```bash
 flet-pkg create --type service --flutter-package onesignal_flutter --output .
