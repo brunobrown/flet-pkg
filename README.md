@@ -1,8 +1,10 @@
-# Flet PKG
+<p align="center"><img src="https://github.com/user-attachments/assets/ee3f4caf-10a7-4c58-948d-6a59fda97850" width="300" height="150" alt="Flet OneSignal"></p>
 
-CLI tool to scaffold Flet extension packages.
+<h1 align="center">Flet OneSignal</h1>
 
-Generates complete, ready-to-develop Flet extensions with Python + Flutter/Dart code, following Flet 0.80.x+ patterns.
+<p align="center">
+  <strong>Generates complete, ready-to-develop Flet extensions with Python + Flutter/Dart code, following Flet 0.80.x+ patterns.</strong>
+</p>
 
 ![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white)
 ![Flet](https://img.shields.io/badge/Flet-0.80.0+-00B4D8?style=for-the-badge&logo=flutter&logoColor=white)
