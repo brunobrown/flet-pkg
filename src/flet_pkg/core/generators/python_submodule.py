@@ -29,9 +29,7 @@ class PythonSubModuleGenerator(CodeGenerator):
 
         # Module docstring
         mod_title = sub.module_name.replace("_", " ").title()
-        lines.append(
-            f'"""\n{plan.control_name} {mod_title} module for {plan.package_name}.\n"""'
-        )
+        lines.append(f'"""\n{plan.control_name} {mod_title} module for {plan.package_name}.\n"""')
         lines.append("")
 
         # Collect typing imports based on types used in methods
@@ -68,9 +66,7 @@ class PythonSubModuleGenerator(CodeGenerator):
             lines.append("")
 
         lines.append("if TYPE_CHECKING:")
-        lines.append(
-            f"    from {plan.package_name}.{control_snake} import {plan.control_name}"
-        )
+        lines.append(f"    from {plan.package_name}.{control_snake} import {plan.control_name}")
         lines.append("")
         lines.append("")
 
@@ -78,8 +74,7 @@ class PythonSubModuleGenerator(CodeGenerator):
         lines.append(f"class {sub.class_name}:")
         lines.append('    """')
         lines.append(
-            f"    {plan.control_name} "
-            f"{sub.module_name.replace('_', ' ').title()} namespace."
+            f"    {plan.control_name} {sub.module_name.replace('_', ' ').title()} namespace."
         )
         lines.append("")
         if sub.docstring:
@@ -122,9 +117,7 @@ class PythonSubModuleGenerator(CodeGenerator):
 
         # All methods are async because they call _invoke_method
         sig = ", ".join(sig_parts)
-        lines.append(
-            f"    async def {method.python_name}({sig}) -> {method.return_type}:"
-        )
+        lines.append(f"    async def {method.python_name}({sig}) -> {method.return_type}:")
 
         # Docstring
         if method.docstring:

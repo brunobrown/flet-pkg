@@ -56,6 +56,8 @@ class DartClass:
 
     name: str
     methods: list[DartMethod] = field(default_factory=list)
+    constructor_params: list[DartParam] = field(default_factory=list)
+    """Constructor parameters (for widget classes in ui_control mode)."""
     docstring: str = ""
     parent_class: str = ""
     source_file: str = ""

@@ -22,22 +22,18 @@ class PythonInitGenerator(CodeGenerator):
 
         # Module docstring
         desc = plan.description or f"{plan.control_name} integration for Flet applications."
-        lines.append(f'"""')
+        lines.append('"""')
         lines.append(f"{plan.package_name} - {desc}")
         lines.append('"""')
         lines.append("")
 
         # Main control import
-        lines.append(
-            f"from {plan.package_name}.{control_snake} import {plan.control_name}"
-        )
+        lines.append(f"from {plan.package_name}.{control_snake} import {plan.control_name}")
         all_exports.append(plan.control_name)
 
         # Sub-module imports
         for sub in plan.sub_modules:
-            lines.append(
-                f"from {plan.package_name}.{sub.module_name} import {sub.class_name}"
-            )
+            lines.append(f"from {plan.package_name}.{sub.module_name} import {sub.class_name}")
             all_exports.append(sub.class_name)
 
         # Types imports (always include error event class)
@@ -63,8 +59,9 @@ class PythonInitGenerator(CodeGenerator):
         # __all__
         lines.append("__all__ = [")
 
-        # Group: Main service
-        lines.append("    # Main service")
+        # Group: Main control/service
+        kind = "service" if plan.base_class == "ft.Service" else "control"
+        lines.append(f"    # Main {kind}")
         lines.append(f'    "{plan.control_name}",')
 
         # Group: Sub-modules
@@ -76,9 +73,7 @@ class PythonInitGenerator(CodeGenerator):
         # Group: Types and events
         lines.append("    # Types and events")
         for name in sorted(set(all_exports)):
-            if name != plan.control_name and name not in [
-                s.class_name for s in plan.sub_modules
-            ]:
+            if name != plan.control_name and name not in [s.class_name for s in plan.sub_modules]:
                 lines.append(f'    "{name}",')
 
         lines.append("]")

@@ -10,7 +10,6 @@ from __future__ import annotations
 import keyword
 import re
 from pathlib import Path
-from typing import Any
 
 from flet_pkg.core.models import (
     DartClass,
@@ -84,6 +83,9 @@ UI_CLASS_SUFFIXES = (
     "Plugins",
     "Plugin",
     "ServiceAPIPrivateImpl",
+    "Utils",
+    "Painter",
+    "Positioned",
 )
 
 # Parent classes that indicate a platform implementation (not a public API).
@@ -92,6 +94,15 @@ PLATFORM_IMPL_BASES = (
     "Platform",
     "PlatformInterface",
     "MethodChannelPlatform",
+)
+
+# Parent classes that indicate internal rendering/painting implementations.
+_INTERNAL_PARENT_BASES = (
+    "CustomPainter",
+    "BoxBorder",
+    "BoxDecoration",
+    "Decoration",
+    "ShapeBorder",
 )
 
 # Parent classes that indicate a Flutter widget (not a service API).
@@ -104,6 +115,25 @@ WIDGET_BASES = (
     "SingleChildRenderObjectWidget",
     "MultiChildRenderObjectWidget",
 )
+
+# Dart types that are Flutter-internal and should NOT become Flet properties.
+_WIDGET_INTERNAL_TYPES = {
+    "Key",
+    "Widget",
+    "BuildContext",
+    "GlobalKey",
+    "ValueKey",
+    "ObjectKey",
+    "UniqueKey",
+    "PageStorageKey",
+    "LocalKey",
+    "Animation",
+    "AnimationController",
+    "TickerProvider",
+    "ScrollController",
+    "FocusNode",
+    "TextEditingController",
+}
 
 # Classes ending with these are parsed into helper_classes (not skipped entirely).
 # Used for event field extraction, type resolution, and config data classes.
@@ -121,6 +151,10 @@ HELPER_CLASS_SUFFIXES = (
     "Options",
     "Params",
     "Info",
+    "Style",
+    "Position",
+    "Gradient",
+    "Animation",
 )
 
 # Parent classes that indicate a data/serialization class (not an API).
@@ -155,6 +189,7 @@ def _should_skip_class(class_name: str, docstring: str = "", parent_class: str =
         or "internal" in docstring.lower()
         or _is_platform_impl(parent_class)
         or parent_class in WIDGET_BASES
+        or parent_class in _INTERNAL_PARENT_BASES
     )
 
 
@@ -181,7 +216,9 @@ def _is_helper_class(class_name: str, parent_class: str = "") -> bool:
 
 
 def _should_skip_method(
-    method_name: str, docstring: str = "", return_type: str = "",
+    method_name: str,
+    docstring: str = "",
+    return_type: str = "",
 ) -> bool:
     return (
         method_name in UI_METHODS
@@ -271,17 +308,6 @@ def _extract_balanced_parens(text: str, open_pos: int) -> str | None:
     return None
 
 
-def _is_callback_param(param: DartParam) -> bool:
-    """Check if a parameter is a callback/function type."""
-    t = param.dart_type
-    return "Function" in t or "Callback" in t or "void " in t
-
-
-def _is_remove_listener_method(name: str) -> bool:
-    """Check if a method is a remove*Listener/Observer/Handler."""
-    return bool(re.match(r"remove\w+(Listener|Observer|Handler)$", name))
-
-
 def _clean_docstring(match: re.Match) -> str:
     doc = match.group(1) or match.group(2) or ""
     doc = re.sub(r"///+", "", doc)
@@ -343,30 +369,6 @@ def _extract_code_block(content: str) -> str | None:
                 return content[1:i]
         i += 1
     return None
-
-
-def _split_params(param_str: str) -> list[str]:
-    params: list[str] = []
-    current: list[str] = []
-    paren_level = 0
-    angle_level = 0
-    for char in param_str:
-        if char == "," and paren_level == 0 and angle_level == 0:
-            params.append("".join(current).strip())
-            current = []
-        else:
-            if char == "(":
-                paren_level += 1
-            elif char == ")":
-                paren_level -= 1
-            elif char == "<":
-                angle_level += 1
-            elif char == ">":
-                angle_level -= 1
-            current.append(char)
-    if current:
-        params.append("".join(current).strip())
-    return params
 
 
 def _parse_param(param_str: str, is_named_section: bool) -> DartParam | None:
@@ -578,13 +580,157 @@ def _parse_enums(content: str) -> list[DartEnum]:
 
 
 # ---------------------------------------------------------------------------
+# Widget constructor parameter parsing
+# ---------------------------------------------------------------------------
+
+
+def _parse_constructor_params(class_name: str, class_block: str) -> list[DartParam]:
+    """Extract constructor parameters from a Dart widget class.
+
+    Builds a field-type map from ``final Type fieldName;`` declarations,
+    then finds the primary constructor and resolves ``this.fieldName``
+    references to their declared types.
+
+    Skips Flutter-internal types (Widget, Key, etc.) that cannot be
+    serialized as Flet control properties.
+    """
+    # Step 1: Build field type map from `final Type fieldName;` declarations
+    field_types: dict[str, str] = {}
+    field_docs: dict[str, str] = {}
+    for m in re.finditer(
+        r"((?:///[^\n]*\n\s*)*)"
+        r"(?:late\s+)?(?:final\s+)?"
+        r"([\w]+(?:<[^;]*?>)?(?:\?)?)\s+"
+        r"(\w+)\s*(?:=[^;]*)?;",
+        class_block,
+    ):
+        doc_lines = m.group(1).strip()
+        raw_type = m.group(2).strip()
+        field_name = m.group(3)
+        if not field_name.startswith("_"):
+            field_types[field_name] = raw_type
+            if doc_lines:
+                field_docs[field_name] = (
+                    re.sub(r"///+\s*", "", doc_lines).strip().replace("\n", " ")
+                )
+
+    # Step 2: Find the primary constructor
+    ctor_re = re.compile(
+        r"(?:const\s+)?" + re.escape(class_name) + r"\s*\(",
+    )
+    ctor_match = ctor_re.search(class_block)
+    if not ctor_match:
+        return []
+
+    params_raw = _extract_balanced_parens(class_block, ctor_match.end() - 1)
+    if params_raw is None:
+        return []
+
+    # Strip all comments (// and ///) and template tags ({@...})
+    params_raw = re.sub(r"//[^\n]*", "", params_raw)
+    params_raw = re.sub(r"\{@\w+[^}]*\}", "", params_raw)
+
+    # Step 3: Parse constructor params (handling this. references)
+    result: list[DartParam] = []
+    is_named = False
+
+    # Split respecting nesting
+    segments: list[tuple[str, bool]] = []
+    current: list[str] = []
+    depth = 0
+    for char in params_raw:
+        if depth == 0:
+            if char == "{":
+                is_named = True
+                continue
+            if char == "}":
+                is_named = False
+                continue
+        if char in "(<[":
+            depth += 1
+        elif char in ")>]":
+            depth -= 1
+        if char == "," and depth == 0:
+            segments.append(("".join(current).strip(), is_named))
+            current = []
+        else:
+            current.append(char)
+    if current:
+        segments.append(("".join(current).strip(), is_named))
+
+    for seg, named in segments:
+        seg = seg.strip()
+        if not seg:
+            continue
+        # Strip annotations
+        seg = re.sub(r"@\w+(\([^)]*\))?\s*", "", seg).strip()
+
+        required = False
+        if seg.startswith("required "):
+            required = True
+            seg = seg[len("required ") :].strip()
+
+        # Extract default value
+        default = None
+        # Match default respecting nesting
+        eq_depth = 0
+        eq_pos = -1
+        for i, c in enumerate(seg):
+            if c in "(<[":
+                eq_depth += 1
+            elif c in ")>]":
+                eq_depth -= 1
+            elif c == "=" and eq_depth == 0:
+                eq_pos = i
+                break
+        if eq_pos >= 0:
+            default = seg[eq_pos + 1 :].strip()
+            seg = seg[:eq_pos].strip()
+
+        # Handle `this.fieldName` syntax
+        this_match = re.match(r"this\.(\w+)$", seg)
+        if this_match:
+            field_name = this_match.group(1)
+            dart_type = field_types.get(field_name, "dynamic")
+        else:
+            # Explicit type: `Type fieldName`
+            parts = seg.split()
+            if len(parts) >= 2:
+                dart_type = " ".join(parts[:-1])
+                field_name = parts[-1]
+            elif len(parts) == 1:
+                field_name = parts[0]
+                dart_type = field_types.get(field_name, "dynamic")
+            else:
+                continue
+
+        if not field_name.isidentifier():
+            continue
+
+        # Skip Flutter-internal types
+        base_type = re.sub(r"[?<].*", "", dart_type).strip()
+        if base_type in _WIDGET_INTERNAL_TYPES:
+            continue
+
+        result.append(
+            DartParam(
+                name=field_name,
+                dart_type=dart_type,
+                required=required and default is None,
+                named=named,
+                default=default,
+            )
+        )
+
+    return result
+
+
+# ---------------------------------------------------------------------------
 # Class method parsing (shared between main and helper classes)
 # ---------------------------------------------------------------------------
 
 
-def _parse_class_methods(
-    class_block: str, skip_filter: bool = True
-) -> list[DartMethod]:
+def _parse_class_methods(class_block: str, skip_filter: bool = True) -> list[DartMethod]:
     """Parse methods from a class body block."""
     methods: list[DartMethod] = []
     seen: set[str] = set()
@@ -737,8 +883,7 @@ def _parse_class_methods(
 
     if skip_filter:
         methods = [
-            m for m in methods
-            if not _should_skip_method(m.name, m.docstring or "", m.return_type)
+            m for m in methods if not _should_skip_method(m.name, m.docstring or "", m.return_type)
         ]
 
     return methods
@@ -779,7 +924,8 @@ def _parse_reexports(lib_dir: Path) -> dict[str, str]:
 
 
 def _parse_top_level_functions(
-    content: str, source_file: str = "",
+    content: str,
+    source_file: str = "",
 ) -> list[DartMethod]:
     """Parse top-level functions (not inside any class) from Dart source.
 
@@ -790,10 +936,7 @@ def _parse_top_level_functions(
     # Skip files that are clearly internal implementation
     if source_file:
         stem = source_file.rsplit("/", maxsplit=1)[-1].replace(".dart", "")
-        if any(
-            stem.endswith(s)
-            for s in ("_conversion", "_internal", "_stub", "_test")
-        ):
+        if any(stem.endswith(s) for s in ("_conversion", "_internal", "_stub", "_test")):
             return []
     # First, find the spans of all class/enum bodies so we can exclude them
     class_spans: list[tuple[int, int]] = []
@@ -824,7 +967,13 @@ def _parse_top_level_functions(
     # Known valid Dart return types (lowercase) — catches false positives
     # from matches inside string literals.
     _VALID_RETURN_TYPES = {
-        "void", "int", "double", "bool", "dynamic", "num", "var",
+        "void",
+        "int",
+        "double",
+        "bool",
+        "dynamic",
+        "num",
+        "var",
     }
 
     for m in func_re.finditer(content):
@@ -907,12 +1056,19 @@ def _parse_top_level_functions(
 # ---------------------------------------------------------------------------
 
 
-def parse_dart_package_api(package_path: Path, strict: bool = False) -> DartPackageAPI:
+def parse_dart_package_api(
+    package_path: Path,
+    strict: bool = False,
+    include_widgets: bool = False,
+) -> DartPackageAPI:
     """Parse a Dart package and return a structured DartPackageAPI.
 
     Args:
         package_path: Path to the extracted Flutter package root.
         strict: If True, only include classes with 2+ public methods.
+        include_widgets: If True, include widget classes and extract their
+            constructor parameters. Used for ``ui_control`` extensions where
+            widget constructor params become Flet control properties.
 
     Returns:
         DartPackageAPI with parsed classes, enums, helper classes, and typedefs.
@@ -938,9 +1094,7 @@ def parse_dart_package_api(package_path: Path, strict: bool = False) -> DartPack
         all_enums.extend(_parse_enums(content))
 
         # Parse top-level functions (not inside any class)
-        all_top_level_functions.extend(
-            _parse_top_level_functions(content, relative_path)
-        )
+        all_top_level_functions.extend(_parse_top_level_functions(content, relative_path))
 
         # Parse classes
         class_matches = re.finditer(
@@ -973,6 +1127,16 @@ def parse_dart_package_api(package_path: Path, strict: bool = False) -> DartPack
             if not class_block:
                 continue
 
+            # Skip private, deprecated, internal, and platform impl classes early
+            if (
+                class_name.startswith("_")
+                or "nodoc" in class_doc.lower()
+                or "internal" in class_doc.lower()
+                or _is_platform_impl(parent_class)
+                or parent_class in _INTERNAL_PARENT_BASES
+            ):
+                continue
+
             # Helper classes (Event, Data, Result, State, etc.) or data model classes
             if _is_helper_class(class_name, parent_class):
                 helper_methods = _parse_class_methods(class_block, skip_filter=False)
@@ -985,6 +1149,26 @@ def parse_dart_package_api(package_path: Path, strict: bool = False) -> DartPack
                         source_file=relative_path,
                     )
                 )
+                continue
+
+            # Widget classes: include when building ui_control extensions
+            is_widget = parent_class in WIDGET_BASES
+            if is_widget and include_widgets:
+                # Skip widgets with internal-looking suffixes
+                if class_name.endswith(UI_CLASS_SUFFIXES):
+                    continue
+                ctor_params = _parse_constructor_params(class_name, class_block)
+                if ctor_params:
+                    all_classes.append(
+                        DartClass(
+                            name=class_name,
+                            methods=[],
+                            constructor_params=ctor_params,
+                            docstring=class_doc,
+                            parent_class=parent_class,
+                            source_file=relative_path,
+                        )
+                    )
                 continue
 
             if _should_skip_class(class_name, class_doc, parent_class):
@@ -1017,71 +1201,3 @@ def parse_dart_package_api(package_path: Path, strict: bool = False) -> DartPack
         reexported_types=reexported,
         top_level_functions=all_top_level_functions,
     )
-
-
-# ---------------------------------------------------------------------------
-# Legacy compatibility
-# ---------------------------------------------------------------------------
-
-
-def parse_dart_package(package_path: Path, strict: bool = False) -> dict[str, Any]:
-    """Parse a Dart package into a dict (legacy format).
-
-    This function is kept for backward compatibility with existing tests.
-    New code should use ``parse_dart_package_api()`` instead.
-    """
-    api = parse_dart_package_api(package_path, strict=strict)
-    result: dict[str, Any] = {}
-    for cls in api.classes:
-        methods_list: list[dict[str, Any]] = []
-        for method in cls.methods:
-            params = []
-            for p in method.params:
-                param_str = (
-                    f"{p.dart_type} {p.name}" if p.dart_type != "dynamic" else p.name
-                )
-                params.append(param_str)
-            methods_list.append(
-                {
-                    "name": method.name,
-                    "return_type": method.return_type,
-                    "params": params,
-                    "docstring": method.docstring,
-                    "is_getter": method.is_getter,
-                    "is_setter": method.is_setter,
-                }
-            )
-        result[cls.name] = {
-            "methods": methods_list,
-            "docstring": cls.docstring,
-            "source_file": cls.source_file,
-        }
-    return result
-
-
-def dart_api_to_template_context(api_info: dict[str, Any]) -> dict[str, Any]:
-    """Convert parsed API info to template context (legacy adapter)."""
-    methods = []
-    for class_name, class_info in api_info.items():
-        for method in class_info["methods"]:
-            python_params = []
-            dart_args = {}
-            for p in method["params"]:
-                parts = p.strip().split()
-                param_name = parts[-1] if parts else p
-                python_params.append(param_name)
-                dart_args[param_name] = param_name
-
-            methods.append(
-                {
-                    "name": camel_to_snake(method["name"]),
-                    "dart_name": method["name"],
-                    "python_params": python_params,
-                    "dart_args": dart_args,
-                    "docstring": method.get("docstring", ""),
-                    "is_getter": method.get("is_getter", False),
-                    "is_setter": method.get("is_setter", False),
-                    "source_class": class_name,
-                }
-            )
-    return {"parsed_methods": methods}

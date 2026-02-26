@@ -97,7 +97,10 @@ class GenerationPipeline:
 
         # Step 2: Parse
         try:
-            api = parse_dart_package_api(package_path)
+            api = parse_dart_package_api(
+                package_path,
+                include_widgets=(extension_type == "ui_control"),
+            )
             n_classes = len(api.classes)
             n_enums = len(api.enums)
             n_helpers = len(api.helper_classes)
@@ -137,9 +140,7 @@ class GenerationPipeline:
                 except Exception:
                     pass  # Non-fatal: stubs remain as fallback
 
-            n_methods = len(plan.main_methods) + sum(
-                len(s.methods) for s in plan.sub_modules
-            )
+            n_methods = len(plan.main_methods) + sum(len(s.methods) for s in plan.sub_modules)
             console.print(
                 f"  [success]Analyzed: {n_methods} methods, "
                 f"{len(plan.sub_modules)} sub-modules, "
@@ -165,15 +166,11 @@ class GenerationPipeline:
                 files = gen.generate(plan)
                 all_files.update(files)
             except Exception as e:
-                result.warnings.append(
-                    f"Generator {gen.__class__.__name__} failed: {e}"
-                )
+                result.warnings.append(f"Generator {gen.__class__.__name__} failed: {e}")
 
         # Step 5: Write files (overwriting template stubs)
         python_pkg_dir = project_dir / "src" / package_name
-        dart_src_dir = (
-            project_dir / "src" / "flutter" / package_name / "lib" / "src"
-        )
+        dart_src_dir = project_dir / "src" / "flutter" / package_name / "lib" / "src"
 
         for filename, content in all_files.items():
             if filename.endswith(".dart"):
@@ -188,9 +185,7 @@ class GenerationPipeline:
         # Clean up template stubs that were replaced by generated files
         self._cleanup_stubs(project_dir, package_name, all_files, result)
 
-        console.print(
-            f"  [success]Generated {len(result.files_generated)} files[/success]"
-        )
+        console.print(f"  [success]Generated {len(result.files_generated)} files[/success]")
 
         return result
 
@@ -209,9 +204,7 @@ class GenerationPipeline:
         orphaned stubs to prevent import conflicts.
         """
         python_pkg_dir = project_dir / "src" / package_name
-        dart_src_dir = (
-            project_dir / "src" / "flutter" / package_name / "lib" / "src"
-        )
+        dart_src_dir = project_dir / "src" / "flutter" / package_name / "lib" / "src"
 
         generated_py = {f for f in generated_files if f.endswith(".py")}
         generated_dart = {f for f in generated_files if f.endswith(".dart")}

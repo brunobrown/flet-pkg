@@ -33,8 +33,10 @@ class DartServiceGenerator(CodeGenerator):
         # Class
         dart_base = f"Flet{service_type}"
         lines.append(f"/// {plan.control_name} {service_type.lower()} implementation for Flet.")
-        lines.append(f"///")
-        lines.append(f"/// This {service_type.lower()} handles all communication between the Python SDK")
+        lines.append("///")
+        lines.append(
+            f"/// This {service_type.lower()} handles all communication between the Python SDK"
+        )
         lines.append(f"/// and the {plan.flutter_package} Flutter SDK.")
         lines.append(f"class {class_name} extends {dart_base} {{")
         lines.append(f"  {class_name}({{required super.control}});")
@@ -102,9 +104,7 @@ class DartServiceGenerator(CodeGenerator):
     # Initialize method
     # ------------------------------------------------------------------
 
-    def _render_initialize(
-        self, lines: list[str], plan: GenerationPlan, class_name: str
-    ) -> None:
+    def _render_initialize(self, lines: list[str], plan: GenerationPlan, class_name: str) -> None:
         main_class = plan.dart_main_class or plan.control_name
 
         lines.append(f"  /// Initialize the {plan.control_name} SDK.")
@@ -118,13 +118,19 @@ class DartServiceGenerator(CodeGenerator):
             for prop in plan.properties:
                 dart_var = _to_camel_case(prop.python_name)
                 if prop.python_type in ("str", "str | None"):
-                    lines.append(f'      final {dart_var} = control.getString("{prop.python_name}");')
+                    lines.append(
+                        f'      final {dart_var} = control.getString("{prop.python_name}");'
+                    )
                 elif prop.python_type == "bool":
-                    lines.append(f'      final {dart_var} = control.getBool("{prop.python_name}", false)!;')
+                    lines.append(
+                        f'      final {dart_var} = control.getBool("{prop.python_name}", false)!;'
+                    )
                 elif prop.python_type in ("int", "int | None"):
                     lines.append(f'      final {dart_var} = control.getInt("{prop.python_name}");')
                 else:
-                    lines.append(f'      final {dart_var} = control.getString("{prop.python_name}");')
+                    lines.append(
+                        f'      final {dart_var} = control.getString("{prop.python_name}");'
+                    )
             lines.append("")
 
             # Apply pre-init setter properties BEFORE initialize()
@@ -224,9 +230,7 @@ class DartServiceGenerator(CodeGenerator):
                 lines.append("    });")
                 lines.append("")
 
-        lines.append(
-            f'    debugPrint("{class_name}._setupListeners: ready");'
-        )
+        lines.append(f'    debugPrint("{class_name}._setupListeners: ready");')
         lines.append("  }")
         lines.append("")
 
@@ -239,7 +243,7 @@ class DartServiceGenerator(CodeGenerator):
         for enum in plan.enums:
             dart_name = enum.python_name
             lines.append(f"  {dart_name} _parse{dart_name}(String value) {{")
-            lines.append(f"    return switch (value.toLowerCase()) {{")
+            lines.append("    return switch (value.toLowerCase()) {")
             for val_name, val_value in enum.values:
                 lines.append(f'      "{val_value}" => {dart_name}.{val_name},')
             # Default fallback
@@ -256,9 +260,7 @@ class DartServiceGenerator(CodeGenerator):
 
     def _render_invoke_method(self, lines: list[str], plan: GenerationPlan) -> None:
         lines.append("  /// Handle method invocations from Python.")
-        lines.append(
-            "  Future<dynamic> _onInvokeMethod(String methodName, dynamic args) async {"
-        )
+        lines.append("  Future<dynamic> _onInvokeMethod(String methodName, dynamic args) async {")
         lines.append("    try {")
         lines.append("      Map<String, dynamic> arguments = {};")
         lines.append("      if (args != null && args is Map) {")
@@ -323,15 +325,10 @@ class DartServiceGenerator(CodeGenerator):
 
         # Original Dart method name for the SDK call
         original_name = method.dart_original_name or method.python_name
-
-        # Determine if the Dart SDK call is async (Future return)
         dart_return = method.return_type
-        sdk_is_async = dart_return != "None" or method.is_async
 
         if method.params:
-            lines.append(
-                f"  Future<String?> {impl_name}(Map<String, dynamic> args) async {{"
-            )
+            lines.append(f"  Future<String?> {impl_name}(Map<String, dynamic> args) async {{")
             # Extract arguments using python_name as key (matches what Python sends)
             for p in method.params:
                 dart_type = _dart_cast_type(p.dart_type)
@@ -344,9 +341,7 @@ class DartServiceGenerator(CodeGenerator):
             sdk_args = ", ".join(p.dart_name for p in method.params if not p.is_optional)
 
             if required_params:
-                checks = " && ".join(
-                    f"{p.dart_name} != null" for p in required_params
-                )
+                checks = " && ".join(f"{p.dart_name} != null" for p in required_params)
                 lines.append(f"    if ({checks}) {{")
 
                 # Determine return handling
@@ -386,21 +381,15 @@ class DartServiceGenerator(CodeGenerator):
                 lines.append(f"    await {sdk_accessor}.{original_name}();")
                 lines.append("    return null;")
             elif "bool" in dart_return.lower():
-                lines.append(
-                    f"    final result = await {sdk_accessor}.{original_name}();"
-                )
+                lines.append(f"    final result = await {sdk_accessor}.{original_name}();")
                 lines.append("    return result.toString();")
             elif dart_return in ("str", "str | None"):
                 lines.append(f"    return await {sdk_accessor}.{original_name}();")
             elif dart_return.startswith("dict") or dart_return.startswith("list"):
-                lines.append(
-                    f"    final result = await {sdk_accessor}.{original_name}();"
-                )
+                lines.append(f"    final result = await {sdk_accessor}.{original_name}();")
                 lines.append("    return jsonEncode(result);")
             else:
-                lines.append(
-                    f"    final result = await {sdk_accessor}.{original_name}();"
-                )
+                lines.append(f"    final result = await {sdk_accessor}.{original_name}();")
                 lines.append("    return result?.toString();")
 
         lines.append("  }")
@@ -410,13 +399,9 @@ class DartServiceGenerator(CodeGenerator):
     # Error handler
     # ------------------------------------------------------------------
 
-    def _render_handle_error(
-        self, lines: list[str], plan: GenerationPlan, class_name: str
-    ) -> None:
+    def _render_handle_error(self, lines: list[str], plan: GenerationPlan, class_name: str) -> None:
         lines.append("  /// Handle and report errors.")
-        lines.append(
-            "  void _handleError(String method, Object error, StackTrace stackTrace) {"
-        )
+        lines.append("  void _handleError(String method, Object error, StackTrace stackTrace) {")
         lines.append(f'    debugPrint("{class_name} ERROR in $method: $error");')
         lines.append("    FlutterError.reportError(FlutterErrorDetails(")
         lines.append("      exception: error,")

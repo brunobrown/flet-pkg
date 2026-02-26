@@ -13,6 +13,13 @@ from flet_pkg.core.models import GenerationPlan
 class PythonTypesGenerator(CodeGenerator):
     """Generates types.py with enums and event dataclasses."""
 
+    @staticmethod
+    def _optional_type(field_type: str) -> str:
+        """Wrap a type in Optional[], avoiding redundant Optional[X | None]."""
+        if "| None" in field_type:
+            return field_type
+        return f"Optional[{field_type}]"
+
     def generate(self, plan: GenerationPlan) -> dict[str, str]:
         # Always generate types.py — the error event class is always
         # imported by the main control file.
@@ -20,9 +27,11 @@ class PythonTypesGenerator(CodeGenerator):
         lines: list[str] = []
 
         # Module docstring
-        lines.append(f'"""')
+        lines.append('"""')
         lines.append(f"Types, enums, and dataclasses for {plan.package_name}.")
         lines.append('"""')
+        lines.append("")
+        lines.append("from __future__ import annotations")
         lines.append("")
 
         # Imports
@@ -53,9 +62,7 @@ class PythonTypesGenerator(CodeGenerator):
         for event in plan.events:
             lines.append("")
             lines.append("@dataclass")
-            lines.append(
-                f'class {event.event_class_name}(ft.Event["{plan.control_name}"]):'
-            )
+            lines.append(f'class {event.event_class_name}(ft.Event["{plan.control_name}"]):')
             event_desc = event.dart_event_name.replace("_", " ")
             lines.append(f'    """Event fired when {event_desc} occurs."""')
             lines.append("")
@@ -65,10 +72,9 @@ class PythonTypesGenerator(CodeGenerator):
                     lines.append(f"    {field_name}: dict = None")
                 elif field_type == "bool":
                     lines.append(f"    {field_name}: bool = False")
-                elif field_type in ("str", "int", "float"):
-                    lines.append(f"    {field_name}: Optional[{field_type}] = None")
                 else:
-                    lines.append(f"    {field_name}: Optional[{field_type}] = None")
+                    opt = self._optional_type(field_type)
+                    lines.append(f"    {field_name}: {opt} = None")
                 field_desc = field_name.replace("_", " ").capitalize()
                 lines.append(f'    """{field_desc}."""')
                 lines.append("")
@@ -87,16 +93,15 @@ class PythonTypesGenerator(CodeGenerator):
                 if field_type == "dict":
                     lines.append(f"    {field_name}: dict = None")
                 else:
-                    lines.append(f"    {field_name}: Optional[{field_type}] = None")
+                    opt = self._optional_type(field_type)
+                    lines.append(f"    {field_name}: {opt} = None")
                 lines.append("")
 
         # Error event (always generated)
         lines.append("")
         lines.append("@dataclass")
         error_cls = plan.error_event_class or f"{plan.control_name}ErrorEvent"
-        lines.append(
-            f'class {error_cls}(ft.Event["{plan.control_name}"]):'
-        )
+        lines.append(f'class {error_cls}(ft.Event["{plan.control_name}"]):')
         lines.append('    """Event fired when an error occurs."""')
         lines.append("")
         lines.append("    method: Optional[str] = None")

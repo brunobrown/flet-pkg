@@ -21,36 +21,60 @@ class PythonControlGenerator(CodeGenerator):
         lines: list[str] = []
 
         # Module docstring
-        lines.append(f'"""')
-        lines.append(f"{plan.control_name} Service for {plan.package_name}.")
+        kind = "Service" if plan.base_class == "ft.Service" else "Control"
+        lines.append('"""')
+        lines.append(f"{plan.control_name} {kind} for {plan.package_name}.")
         if plan.description:
             lines.append(f"\n{plan.description}")
         lines.append('"""')
 
         # Imports
+        is_service = plan.base_class == "ft.Service"
         lines.append("")
-        lines.append("from dataclasses import field")
-        lines.append("from typing import Any, Optional")
+        if plan.sub_modules:
+            lines.append("from dataclasses import field")
+
+        # Only import Any when needed (service _invoke_method or method signatures)
+        needs_any = (
+            is_service
+            or any("Any" in p.python_type for m in plan.main_methods for p in m.params)
+            or any("Any" in m.return_type for m in plan.main_methods)
+        )
+        if needs_any:
+            lines.append("from typing import Any, Optional")
+        else:
+            lines.append("from typing import Optional")
         lines.append("")
         lines.append("import flet as ft")
         lines.append("")
 
         # Sub-module imports
         for sub in plan.sub_modules:
-            lines.append(
-                f"from {plan.package_name}.{sub.module_name} import {sub.class_name}"
-            )
+            lines.append(f"from {plan.package_name}.{sub.module_name} import {sub.class_name}")
 
-        # Type imports
+        # Type imports — only import types actually used by properties/events
         type_imports: list[str] = []
         for event in plan.events:
             type_imports.append(event.event_class_name)
         # Add error event
         type_imports.append(plan.error_event_class or f"{plan.control_name}ErrorEvent")
+
+        # Collect type names referenced by properties
+        used_type_names: set[str] = set()
+        for prop in plan.properties:
+            for enum in plan.enums:
+                if enum.python_name in prop.python_type:
+                    used_type_names.add(enum.python_name)
+            for stub in plan.stub_data_classes:
+                if stub.python_name in prop.python_type:
+                    used_type_names.add(stub.python_name)
+
         for enum in plan.enums:
-            type_imports.append(enum.python_name)
+            if enum.python_name in used_type_names:
+                type_imports.append(enum.python_name)
         for stub in plan.stub_data_classes:
-            type_imports.append(stub.python_name)
+            if stub.python_name in used_type_names:
+                type_imports.append(stub.python_name)
         if type_imports:
             lines.append(f"from {plan.package_name}.types import (")
             for imp in sorted(set(type_imports)):
@@ -115,9 +139,7 @@ class PythonControlGenerator(CodeGenerator):
 
         # Error event handler
         error_cls = plan.error_event_class or f"{plan.control_name}ErrorEvent"
-        lines.append(
-            f"    on_error: Optional[ft.EventHandler[{error_cls}]] = None"
-        )
+        lines.append(f"    on_error: Optional[ft.EventHandler[{error_cls}]] = None")
         lines.append('    """Called when an error occurs in the SDK."""')
         lines.append("")
 
@@ -136,9 +158,7 @@ class PythonControlGenerator(CodeGenerator):
             lines.append('        """Initialize the service and sub-modules."""')
             lines.append("        super().init()")
             for sub in plan.sub_modules:
-                lines.append(
-                    f"        self._{sub.module_name} = {sub.class_name}(self)"
-                )
+                lines.append(f"        self._{sub.module_name} = {sub.class_name}(self)")
             lines.append("")
 
         # Sub-module properties
@@ -148,9 +168,7 @@ class PythonControlGenerator(CodeGenerator):
             mod_title = sub.module_name.replace("_", " ").title()
             lines.append(f'        """Access the {mod_title} namespace."""')
             lines.append(f"        if self._{sub.module_name} is None:")
-            lines.append(
-                f"            self._{sub.module_name} = {sub.class_name}(self)"
-            )
+            lines.append(f"            self._{sub.module_name} = {sub.class_name}(self)")
             lines.append(f"        return self._{sub.module_name}")
             lines.append("")
 
@@ -159,47 +177,50 @@ class PythonControlGenerator(CodeGenerator):
             lines.extend(self._render_method(method, plan))
             lines.append("")
 
-        # _is_supported_platform
-        lines.append("    def _is_supported_platform(self) -> bool:")
-        lines.append(
-            f'        """Check if the current platform supports {plan.control_name}."""'
-        )
-        lines.append("        if not self.page:")
-        lines.append("            return False")
-        lines.append("        return self.page.platform in (")
-        lines.append("            ft.PagePlatform.ANDROID,")
-        lines.append("            ft.PagePlatform.IOS,")
-        lines.append("        )")
-        lines.append("")
+        # Platform guard and invoke_method only for service extensions
+        # (UI controls are pure Dart widgets that work on all platforms)
+        is_service = plan.base_class == "ft.Service"
+        if is_service:
+            lines.append("    def _is_supported_platform(self) -> bool:")
+            lines.append(
+                f'        """Check if the current platform supports {plan.control_name}."""'
+            )
+            lines.append("        if not self.page:")
+            lines.append("            return False")
+            lines.append("        return self.page.platform in (")
+            lines.append("            ft.PagePlatform.ANDROID,")
+            lines.append("            ft.PagePlatform.IOS,")
+            lines.append("            ft.PagePlatform.MACOS,")
+            lines.append("            ft.PagePlatform.WINDOWS,")
+            lines.append("            ft.PagePlatform.LINUX,")
+            lines.append("        )")
+            lines.append("")
 
-        # _invoke_method override with platform validation
-        lines.append("    async def _invoke_method(")
-        lines.append("        self,")
-        lines.append("        method_name: str,")
-        lines.append("        arguments: Optional[dict[str, Any]] = None,")
-        lines.append("        timeout: Optional[float] = None,")
-        lines.append("    ) -> Any:")
-        lines.append('        """Internal method for invoking Flutter methods."""')
-        lines.append("        if not self._is_supported_platform():")
-        lines.append("            platform_name = self.page.platform.value if self.page else 'unknown'")
-        lines.append("            raise ft.FletUnsupportedPlatformException(")
-        lines.append(
-            f'                f"{plan.control_name} is only supported on Android and iOS. "'
-        )
-        lines.append(
-            "                f\"Current platform: {platform_name}. \""
-        )
-        lines.append(
-            "                f\"Method '{method_name}' cannot be executed.\""
-        )
-        lines.append("            )")
-        lines.append("        effective_timeout = timeout if timeout is not None else 25.0")
-        lines.append("        return await super()._invoke_method(")
-        lines.append("            method_name=method_name,")
-        lines.append("            arguments=arguments or {},")
-        lines.append("            timeout=effective_timeout,")
-        lines.append("        )")
-        lines.append("")
+            lines.append("    async def _invoke_method(")
+            lines.append("        self,")
+            lines.append("        method_name: str,")
+            lines.append("        arguments: Optional[dict[str, Any]] = None,")
+            lines.append("        timeout: Optional[float] = None,")
+            lines.append("    ) -> Any:")
+            lines.append('        """Internal method for invoking Flutter methods."""')
+            lines.append("        if not self._is_supported_platform():")
+            lines.append(
+                "            platform_name = self.page.platform.value if self.page else 'unknown'"
+            )
+            lines.append("            raise ft.FletUnsupportedPlatformException(")
+            lines.append(
+                f'                f"{plan.control_name} is only supported on Android and iOS. "'
+            )
+            lines.append('                f"Current platform: {platform_name}. "')
+            lines.append("                f\"Method '{method_name}' cannot be executed.\"")
+            lines.append("            )")
+            lines.append("        effective_timeout = timeout if timeout is not None else 25.0")
+            lines.append("        return await super()._invoke_method(")
+            lines.append("            method_name=method_name,")
+            lines.append("            arguments=arguments or {},")
+            lines.append("            timeout=effective_timeout,")
+            lines.append("        )")
+            lines.append("")
 
         return {filename: "\n".join(lines)}
 
@@ -221,9 +242,7 @@ class PythonControlGenerator(CodeGenerator):
 
         # All methods are async because they call _invoke_method
         sig = ", ".join(sig_parts)
-        lines.append(
-            f"    async def {method.python_name}({sig}) -> {method.return_type}:"
-        )
+        lines.append(f"    async def {method.python_name}({sig}) -> {method.return_type}:")
 
         # Docstring
         if method.docstring:
@@ -254,13 +273,10 @@ class PythonControlGenerator(CodeGenerator):
         if method.return_type == "None":
             if invoke_args:
                 lines.append(
-                    f"        await self._invoke_method("
-                    f'"{method.dart_method_name}", {invoke_args})'
+                    f'        await self._invoke_method("{method.dart_method_name}", {invoke_args})'
                 )
             else:
-                lines.append(
-                    f'        await self._invoke_method("{method.dart_method_name}")'
-                )
+                lines.append(f'        await self._invoke_method("{method.dart_method_name}")')
         elif "bool" in method.return_type.lower():
             if invoke_args:
                 lines.append(
@@ -269,8 +285,7 @@ class PythonControlGenerator(CodeGenerator):
                 )
             else:
                 lines.append(
-                    f"        result = await self._invoke_method("
-                    f'"{method.dart_method_name}")'
+                    f'        result = await self._invoke_method("{method.dart_method_name}")'
                 )
             lines.append('        return result == "true"')
         else:
