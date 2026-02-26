@@ -1,6 +1,4 @@
-<p align="center"><img src="https://github.com/user-attachments/assets/ee3f4caf-10a7-4c58-948d-6a59fda97850" width="300" height="150" alt="Flet OneSignal"></p>
-
-<h1 align="center">Flet OneSignal</h1>
+<p align="center"><img src="https://github.com/user-attachments/assets/ac357615-d650-4dd0-85e4-5c4746d1d68b" width="500" height="500" alt="Flet PKG"></p>
 
 <p align="center">
   <strong>Generates complete, ready-to-develop Flet extensions with Python + Flutter/Dart code, following Flet 0.80.x+ patterns.</strong>
