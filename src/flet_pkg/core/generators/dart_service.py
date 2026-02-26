@@ -337,8 +337,16 @@ class DartServiceGenerator(CodeGenerator):
             # Build null check condition for required params
             required_params = [p for p in method.params if not p.is_optional]
 
-            # Build SDK call arguments
-            sdk_args = ", ".join(p.dart_name for p in method.params if not p.is_optional)
+            # Build SDK call arguments (use "name: name" for named params)
+            sdk_arg_parts = []
+            for p in method.params:
+                if p.is_optional:
+                    continue
+                if p.is_named:
+                    sdk_arg_parts.append(f"{p.dart_name}: {p.dart_name}")
+                else:
+                    sdk_arg_parts.append(p.dart_name)
+            sdk_args = ", ".join(sdk_arg_parts)
 
             if required_params:
                 checks = " && ".join(f"{p.dart_name} != null" for p in required_params)
@@ -377,19 +385,26 @@ class DartServiceGenerator(CodeGenerator):
             # No params
             lines.append(f"  Future<String?> {impl_name}() async {{")
 
+            # Getters use property access (no parens), methods use call syntax
+            call = (
+                f"{sdk_accessor}.{original_name}"
+                if method.is_getter
+                else f"{sdk_accessor}.{original_name}()"
+            )
+
             if dart_return == "None":
-                lines.append(f"    await {sdk_accessor}.{original_name}();")
+                lines.append(f"    await {call};")
                 lines.append("    return null;")
             elif "bool" in dart_return.lower():
-                lines.append(f"    final result = await {sdk_accessor}.{original_name}();")
+                lines.append(f"    final result = await {call};")
                 lines.append("    return result.toString();")
             elif dart_return in ("str", "str | None"):
-                lines.append(f"    return await {sdk_accessor}.{original_name}();")
+                lines.append(f"    return await {call};")
             elif dart_return.startswith("dict") or dart_return.startswith("list"):
-                lines.append(f"    final result = await {sdk_accessor}.{original_name}();")
+                lines.append(f"    final result = await {call};")
                 lines.append("    return jsonEncode(result);")
             else:
-                lines.append(f"    final result = await {sdk_accessor}.{original_name}();")
+                lines.append(f"    final result = await {call};")
                 lines.append("    return result?.toString();")
 
         lines.append("  }")

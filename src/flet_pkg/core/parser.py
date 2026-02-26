@@ -752,6 +752,11 @@ def _parse_class_methods(class_block: str, skip_filter: bool = True) -> list[Dar
         if _is_inside_comment(class_block, m.start()):
             continue
 
+        # Skip @Deprecated or @visibleForTesting annotated methods
+        annotation_text = m.group(0)
+        if re.search(r"@[Dd]eprecated|@visibleForTesting", annotation_text):
+            continue
+
         is_static = m.group(1) is not None
         return_type = m.group(2)
         accessor = m.group(3)

@@ -42,6 +42,7 @@ _TYPE_MAP: dict[str, str] = {
     "Clip": "str",
     "BoxFit": "str",
     "Alignment": "str",
+    "AlignmentGeometry": "str",
     "AlignmentDirectional": "str",
     "BlendMode": "str",
     "FilterQuality": "str",

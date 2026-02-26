@@ -972,6 +972,7 @@ class PackageAnalyzer:
                     dart_name=p.name,
                     dart_type=p.dart_type,
                     is_optional=not p.required and p.named,
+                    is_named=p.named,
                     default=p.default,
                 )
             )
@@ -984,6 +985,7 @@ class PackageAnalyzer:
             return_type=python_return,
             docstring=method.docstring,
             is_async=True,
+            is_getter=method.is_getter,
             dart_original_name=method.name,
             dart_class_name=dart_class_name,
         )
@@ -1697,9 +1699,13 @@ def _sanitize_python_type(
     else:
         base = python_type.strip()
 
-    # Generic types (list[...], dict[...]) are fine
+    # Generic types (list[...], dict[...]) — sanitize inner types recursively
     if "[" in python_type:
-        return python_type
+        bracket_start = python_type.index("[")
+        outer = python_type[:bracket_start]
+        inner = python_type[bracket_start + 1 : python_type.rindex("]")]
+        sanitized_inner = _sanitize_python_type(inner, known_types)
+        return f"{outer}[{sanitized_inner}]"
 
     # Known Python types are fine
     if base.lower() in {t.lower() for t in _KNOWN_PYTHON_TYPES}:

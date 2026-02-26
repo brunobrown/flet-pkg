@@ -91,6 +91,7 @@ class ParamPlan:
     dart_name: str = ""
     dart_type: str = "dynamic"
     is_optional: bool = False
+    is_named: bool = False
     default: str | None = None
 
     def __post_init__(self):
@@ -108,6 +109,7 @@ class MethodPlan:
     return_type: str = "None"
     docstring: str = ""
     is_async: bool = True
+    is_getter: bool = False
     dart_original_name: str = ""
     dart_class_name: str = ""
 
