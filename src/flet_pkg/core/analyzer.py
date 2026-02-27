@@ -14,6 +14,7 @@ from flet_pkg.core.models import (
     DartClass,
     DartMethod,
     DartPackageAPI,
+    DartParam,
     EnumPlan,
     EventPlan,
     GenerationPlan,
@@ -21,6 +22,7 @@ from flet_pkg.core.models import (
     ParamPlan,
     PropertyPlan,
     StubDataClass,
+    SubControlPlan,
     SubModulePlan,
 )
 from flet_pkg.core.parser import camel_to_snake, parse_dart_package_api
@@ -29,6 +31,34 @@ from flet_pkg.core.type_map import (
     map_dart_type,
     map_dart_type_flet,
     map_return_type,
+)
+
+# Internal Dart methods that should never appear in the generated Python API.
+# These are framework/language internals, not user-facing functionality.
+_INTERNAL_METHODS = frozenset(
+    {
+        "hashCode",
+        "getHashCode",
+        "runtimeType",
+        "toString",
+        "noSuchMethod",
+        "toJson",
+        "fromJson",
+        "toMap",
+        "fromMap",
+        "copyWith",
+        "compareTo",
+        "toJsonString",
+        "fromJsonFunction",
+        "getFromJsonFunction",
+        "removeDuplicates",
+        "addIfNotNull",
+        "compute",
+        "identical",
+        "jsonRepresentation",
+        "convertToJsonString",
+        "jsonEncode",
+    }
 )
 
 
@@ -167,6 +197,14 @@ class PackageAnalyzer:
         # Generate data classes from local helper classes (Configuration,
         # Options, Params, etc.) that are referenced as method parameters.
         self._generate_local_data_classes(api, plan, generated_type_names)
+
+        # Post-process: re-sanitize types against actually-generated names.
+        # Types from known_types that were NOT generated must be replaced
+        # with dict | None (e.g. WorkoutRouteLocation → dict | None).
+        # Include sub-control names so they don't get sanitized away.
+        for sc in plan.sub_controls:
+            generated_type_names.add(sc.control_name)
+        _post_sanitize_property_types(plan, generated_type_names)
 
         # Set error event class name with short prefix
         prefix = "OS" if control_name.lower().startswith("one") else control_name
@@ -371,8 +409,6 @@ class PackageAnalyzer:
         Flet control properties. Callback params become event handlers.
         Selects the best-matching widget class (not merging all).
         """
-        from flet_pkg.core.generators.base import CodeGenerator
-
         # Select the best-matching widget class for the control name
         widget_classes = [c for c in api.classes if c.constructor_params]
         if not widget_classes:
@@ -387,103 +423,42 @@ class PackageAnalyzer:
         # Track referenced helper types that need generation
         referenced_helpers: set[str] = set()
 
+        # Detect sub-controls (compound widgets)
+        sub_controls = self._detect_sub_controls(
+            main_widget,
+            widget_classes,
+            api.component_classes,
+            helper_map,
+            plan,
+        )
+        plan.sub_controls = sub_controls
+
+        # Collect all sub-control names so they are not sanitized to dict
+        sub_control_names = {sc.control_name for sc in self._flatten_sub_controls(sub_controls)}
+
         for param in main_widget.constructor_params:
-            # Detect callbacks → event handlers
-            base_type = re.sub(r"[?<].*", "", param.dart_type).strip()
-            is_callback = (
-                base_type in self._CALLBACK_TYPES
-                or base_type.startswith(self._CALLBACK_PREFIXES)
-                or "Function" in param.dart_type
-                or "Callback" in param.dart_type
+            result = self._process_widget_param(
+                param,
+                plan,
+                control_name,
+                helper_map,
+                referenced_helpers,
+                is_ui=True,
+                sub_control_names=sub_control_names,
             )
-
-            # Also detect by name: Flutter convention `onXxx` = callback
-            if not is_callback and re.match(r"on[A-Z]", param.name):
-                is_callback = True
-
-            if is_callback:
-                python_attr = camel_to_snake(param.name)
-                if not python_attr.startswith("on_"):
-                    python_attr = f"on_{python_attr}"
-                event_class = f"{control_name}{param.name[0].upper()}{param.name[1:]}Event"
-                if not any(e.python_attr_name == python_attr for e in plan.events):
-                    plan.events.append(
-                        EventPlan(
-                            python_attr_name=python_attr,
-                            event_class_name=event_class,
-                            dart_event_name=python_attr.removeprefix("on_"),
-                            dart_listener_method=param.name,
-                        )
-                    )
-                continue
-
-            # Skip non-serializable Flutter types
-            if base_type in self._NON_SERIALIZABLE_TYPES:
-                continue
-            # Skip any Controller or Painter subtype (complex objects)
-            if "Controller" in base_type or base_type.endswith("Painter"):
-                continue
-
-            # Check if this type references a package helper class
-            if base_type in helper_map:
-                referenced_helpers.add(base_type)
-
-            # Check for generic type params (e.g., List<SegmentLinearIndicator>)
-            generic_match = re.search(r"<(\w+)>", param.dart_type)
-            if generic_match:
-                inner_type = generic_match.group(1)
-                if inner_type in helper_map:
-                    referenced_helpers.add(inner_type)
-
-            # Convert to Python property (Flet-aware for ui_control)
-            python_name = camel_to_snake(param.name)
-            is_ui = plan.base_class != "ft.Service"
-
-            if is_ui:
-                python_type = map_dart_type_flet(param.dart_type)
-                # None means "skip this property" (e.g. Key)
-                if python_type is None:
-                    continue
-            else:
-                python_type = map_dart_type(param.dart_type)
-
-            python_type = _sanitize_python_type(python_type, self._known_types)
-
-            # Determine default value
-            default_value = CodeGenerator._py_default(param.default)
-
-            # Use field(default_factory=list) for list types (before nullable logic)
-            if python_type.startswith("list[") and default_value in ("None", '""'):
-                default_value = "field(default_factory=list)"
-
-            # In Flet controls, all properties are dataclass fields and need
-            # defaults. If default is None, the type must be nullable.
-            if default_value == "None" and "None" not in python_type:
-                python_type = f"{python_type} | None"
-
-            # Compute Dart getter expression for UI controls
-            dart_getter = ""
-            if is_ui:
-                dart_getter = get_flet_dart_getter(python_type, python_name)
-
-            # Skip duplicate properties
-            if any(p.python_name == python_name for p in plan.properties):
-                continue
-
-            plan.properties.append(
-                PropertyPlan(
-                    python_name=python_name,
-                    python_type=python_type,
-                    default_value=default_value,
-                    docstring="",
-                    dart_name=param.name,
-                    dart_getter=dart_getter,
-                )
-            )
+            if result is not None:
+                if isinstance(result, EventPlan):
+                    if not any(e.python_attr_name == result.python_attr_name for e in plan.events):
+                        plan.events.append(result)
+                else:
+                    if not any(p.python_name == result.python_name for p in plan.properties):
+                        plan.properties.append(result)
 
         # Generate dataclasses for referenced helper types (recursive)
         generated_names = {e.python_name for e in plan.enums}
         generated_names.update(s.python_name for s in plan.stub_data_classes)
+        # Add sub-control names so _post_sanitize doesn't replace them
+        generated_names.update(sub_control_names)
         pending = list(referenced_helpers)
         while pending:
             helper_name = pending.pop(0)
@@ -518,6 +493,255 @@ class PackageAnalyzer:
         # type names.  Types from `known_types` (barrel analysis) that were
         # NOT generated as Python classes must be replaced with `dict`.
         _post_sanitize_property_types(plan, generated_names)
+
+    def _process_widget_param(
+        self,
+        param: DartParam,
+        plan: GenerationPlan,
+        control_name: str,
+        helper_map: dict[str, DartClass],
+        referenced_helpers: set[str],
+        is_ui: bool = True,
+        sub_control_names: set[str] | None = None,
+    ) -> PropertyPlan | EventPlan | None:
+        """Process a single widget constructor param into a property or event.
+
+        Returns a ``PropertyPlan``, ``EventPlan``, or ``None`` (skip).
+        """
+        from flet_pkg.core.generators.base import CodeGenerator
+
+        base_type = re.sub(r"[?<].*", "", param.dart_type).strip()
+
+        # Detect callbacks → event handlers
+        is_callback = (
+            base_type in self._CALLBACK_TYPES
+            or base_type.startswith(self._CALLBACK_PREFIXES)
+            or "Function" in param.dart_type
+            or "Callback" in param.dart_type
+        )
+        if not is_callback and re.match(r"on[A-Z]", param.name):
+            is_callback = True
+
+        if is_callback:
+            python_attr = camel_to_snake(param.name)
+            if not python_attr.startswith("on_"):
+                python_attr = f"on_{python_attr}"
+            event_class = f"{control_name}{param.name[0].upper()}{param.name[1:]}Event"
+            return EventPlan(
+                python_attr_name=python_attr,
+                event_class_name=event_class,
+                dart_event_name=python_attr.removeprefix("on_"),
+                dart_listener_method=param.name,
+            )
+
+        # Skip non-serializable Flutter types
+        if base_type in self._NON_SERIALIZABLE_TYPES:
+            return None
+        if "Controller" in base_type or base_type.endswith("Painter"):
+            return None
+
+        # Check if this type references a package helper class
+        if base_type in helper_map:
+            referenced_helpers.add(base_type)
+
+        # Check for generic type params (e.g., List<SegmentLinearIndicator>)
+        generic_match = re.search(r"<(\w+)>", param.dart_type)
+        if generic_match:
+            inner_type = generic_match.group(1)
+            if inner_type in helper_map:
+                referenced_helpers.add(inner_type)
+
+        # Check if this param is a sub-control type
+        if sub_control_names is None:
+            sub_control_names = set()
+
+        # Resolve the type: if this is a sub-control, use its class name
+        is_sub_control_type = base_type in sub_control_names
+        is_list_sub_control = False
+        if generic_match and generic_match.group(1) in sub_control_names:
+            is_sub_control_type = True
+            is_list_sub_control = True
+
+        python_name = camel_to_snake(param.name)
+
+        if is_sub_control_type:
+            # generic_match is guaranteed non-None when is_list_sub_control=True
+            sc_name = (
+                generic_match.group(1) if (is_list_sub_control and generic_match) else base_type
+            )
+            if is_list_sub_control:
+                python_type = f"list[{sc_name}]"
+                default_value = "field(default_factory=list)"
+                dart_getter = f'buildWidgets("{python_name}")'
+            else:
+                is_nullable = param.dart_type.endswith("?")
+                python_type = f"{sc_name} | None" if is_nullable else sc_name
+                default_value = "None"
+                if "None" not in python_type:
+                    python_type = f"{python_type} | None"
+                dart_getter = f'buildWidget("{python_name}")'
+            return PropertyPlan(
+                python_name=python_name,
+                python_type=python_type,
+                default_value=default_value,
+                docstring="",
+                dart_name=param.name,
+                dart_getter=dart_getter,
+            )
+
+        # Convert to Python property (Flet-aware for ui_control)
+        if is_ui:
+            python_type = map_dart_type_flet(param.dart_type)
+            if python_type is None:
+                return None
+        else:
+            python_type = map_dart_type(param.dart_type)
+
+        python_type = _sanitize_python_type(python_type, self._known_types)
+
+        # Determine default value
+        default_value = CodeGenerator._py_default(param.default)
+
+        # Use field(default_factory=list) for list types (before nullable logic)
+        if python_type.startswith("list[") and default_value in ("None", '""'):
+            default_value = "field(default_factory=list)"
+
+        # In Flet controls, all properties are dataclass fields and need
+        # defaults. If default is None, the type must be nullable.
+        if default_value == "None" and "None" not in python_type:
+            python_type = f"{python_type} | None"
+
+        # Compute Dart getter expression for UI controls
+        dart_getter = ""
+        if is_ui:
+            dart_getter = get_flet_dart_getter(python_type, python_name)
+
+        return PropertyPlan(
+            python_name=python_name,
+            python_type=python_type,
+            default_value=default_value,
+            docstring="",
+            dart_name=param.name,
+            dart_getter=dart_getter,
+        )
+
+    def _detect_sub_controls(
+        self,
+        main_widget: DartClass,
+        widget_classes: list[DartClass],
+        component_classes: list[DartClass],
+        helper_map: dict[str, DartClass],
+        plan: GenerationPlan,
+        depth: int = 1,
+        max_depth: int = 3,
+    ) -> list[SubControlPlan]:
+        """Detect compound widget sub-controls from constructor param types.
+
+        Recursively identifies constructor parameters whose types match
+        other classes in the same package, generating ``SubControlPlan``
+        entries for each.
+        """
+        if depth > max_depth:
+            return []
+
+        # Build candidate map: all widgets + components, excluding main
+        candidates: dict[str, DartClass] = {}
+        for cls in widget_classes:
+            if cls.name != main_widget.name:
+                candidates[cls.name] = cls
+        for cls in component_classes:
+            candidates[cls.name] = cls
+
+        helper_names = set(helper_map.keys())
+        sub_controls: list[SubControlPlan] = []
+
+        for param in main_widget.constructor_params:
+            base_type = re.sub(r"[?<].*", "", param.dart_type).strip()
+            is_list = False
+
+            # Check for List<T> pattern
+            generic_match = re.search(r"<(\w+)>", param.dart_type)
+            if generic_match:
+                inner = generic_match.group(1)
+                if inner in candidates and param.dart_type.startswith("List"):
+                    base_type = inner
+                    is_list = True
+                elif inner in candidates:
+                    base_type = inner
+
+            # Skip Widget (already ft.Control), helpers, and non-candidates
+            if base_type == "Widget" or base_type in helper_names:
+                continue
+            if base_type not in candidates:
+                continue
+
+            candidate = candidates[base_type]
+            python_name = camel_to_snake(param.name)
+
+            # Process params of the sub-control
+            sub_props: list[PropertyPlan] = []
+            sub_events: list[EventPlan] = []
+            dummy_helpers: set[str] = set()
+
+            for sub_param in candidate.constructor_params:
+                result = self._process_widget_param(
+                    sub_param,
+                    plan,
+                    base_type,
+                    helper_map,
+                    dummy_helpers,
+                    is_ui=True,
+                    sub_control_names=set(),
+                )
+                if result is None:
+                    continue
+                if isinstance(result, EventPlan):
+                    sub_events.append(result)
+                else:
+                    sub_props.append(result)
+
+            # Recurse for nested sub-controls
+            nested = self._detect_sub_controls(
+                candidate,
+                widget_classes,
+                component_classes,
+                helper_map,
+                plan,
+                depth=depth + 1,
+                max_depth=max_depth,
+            )
+
+            sub_controls.append(
+                SubControlPlan(
+                    control_name=base_type,
+                    dart_class_name=candidate.name,
+                    properties=sub_props,
+                    events=sub_events,
+                    parent_property=python_name,
+                    is_list=is_list,
+                    sub_controls=nested,
+                    depth=depth,
+                )
+            )
+
+        return sub_controls
+
+    @staticmethod
+    def _flatten_sub_controls(
+        sub_controls: list[SubControlPlan],
+    ) -> list[SubControlPlan]:
+        """Flatten a recursive sub-control tree into a list (leaves first)."""
+        result: list[SubControlPlan] = []
+        seen: set[str] = set()
+        for sc in sub_controls:
+            for nested in PackageAnalyzer._flatten_sub_controls(sc.sub_controls):
+                if nested.control_name not in seen:
+                    result.append(nested)
+                    seen.add(nested.control_name)
+            if sc.control_name not in seen:
+                result.append(sc)
+                seen.add(sc.control_name)
+        return result
 
     # Suffixes that indicate internal/non-user-facing widget classes.
     _INTERNAL_WIDGET_SUFFIXES = (
@@ -886,6 +1110,10 @@ class PackageAnalyzer:
             if method.name in prop_methods:
                 continue
 
+            # Skip internal Dart methods (hashCode, fromJson, etc.)
+            if method.name in _INTERNAL_METHODS:
+                continue
+
             # Check if this method is an event listener
             event = self._detect_event(method, plan.control_name, api, dart_main_class, cls.name)
             if event:
@@ -963,6 +1191,9 @@ class PackageAnalyzer:
                     cls.name, control_name, dart_main_class
                 )
             for method in cls.methods:
+                # Skip internal Dart methods (hashCode, fromJson, etc.)
+                if method.name in _INTERNAL_METHODS:
+                    continue
                 # Skip event listeners (handled at main level)
                 if self._is_listener_method(method):
                     continue
@@ -1045,6 +1276,9 @@ class PackageAnalyzer:
                     default=p.default,
                 )
             )
+
+        # Sort params: required first, then optional (Python requirement)
+        params.sort(key=lambda p: (p.is_optional, 0))
 
         # ALL methods are forced async because they call _invoke_method
         return MethodPlan(
@@ -1860,13 +2094,24 @@ def _post_sanitize_property_types(
     Python classes/enums are replaced with ``dict | None``.
     """
     # Build the set of types that are valid in generated Python code
-    valid = set(generated_names)
+    # Use lowercase for case-insensitive comparison (see _resanitize_type)
+    valid = {n.lower() for n in generated_names}
     valid.update(t.lower() for t in _KNOWN_PYTHON_TYPES)
     # Flet types (ft.Color, ft.Alignment, etc.) are always valid
     flet_prefixes = ("ft.",)
 
     for prop in plan.properties:
         prop.python_type = _resanitize_type(prop.python_type, valid, flet_prefixes)
+
+    # Also sanitize method param types and return types
+    all_methods = list(plan.main_methods)
+    for sub in plan.sub_modules:
+        all_methods.extend(sub.methods)
+
+    for method in all_methods:
+        method.return_type = _resanitize_type(method.return_type, valid, flet_prefixes)
+        for p in method.params:
+            p.python_type = _resanitize_type(p.python_type, valid, flet_prefixes)
 
 
 def _resanitize_type(

@@ -8,7 +8,7 @@ properties, event handlers, and async methods.
 from __future__ import annotations
 
 from flet_pkg.core.generators.base import CodeGenerator
-from flet_pkg.core.models import GenerationPlan, MethodPlan
+from flet_pkg.core.models import GenerationPlan, MethodPlan, SubControlPlan
 from flet_pkg.core.parser import camel_to_snake
 
 
@@ -31,8 +31,11 @@ class PythonControlGenerator(CodeGenerator):
         # Imports
         is_service = plan.base_class == "ft.Service"
         lines.append("")
+        all_props = list(plan.properties)
+        for sc in self._flatten_sub_controls(plan.sub_controls):
+            all_props.extend(sc.properties)
         needs_field = bool(plan.sub_modules) or any(
-            p.default_value.startswith("field(") for p in plan.properties
+            p.default_value.startswith("field(") for p in all_props
         )
         if needs_field:
             lines.append("from dataclasses import field")
@@ -62,14 +65,27 @@ class PythonControlGenerator(CodeGenerator):
         # Add error event
         type_imports.append(plan.error_event_class or f"{plan.control_name}ErrorEvent")
 
-        # Collect type names referenced by properties
+        # Collect type names referenced by properties AND method signatures
         used_type_names: set[str] = set()
-        for prop in plan.properties:
+
+        # Gather all type strings to scan: properties + method params + returns
+        type_strings: list[str] = [p.python_type for p in plan.properties]
+        for method in plan.main_methods:
+            type_strings.append(method.return_type)
+            for p in method.params:
+                type_strings.append(p.python_type)
+        for sub in plan.sub_modules:
+            for method in sub.methods:
+                type_strings.append(method.return_type)
+                for p in method.params:
+                    type_strings.append(p.python_type)
+
+        for type_str in type_strings:
             for enum in plan.enums:
-                if enum.python_name in prop.python_type:
+                if enum.python_name in type_str:
                     used_type_names.add(enum.python_name)
             for stub in plan.stub_data_classes:
-                if stub.python_name in prop.python_type:
+                if stub.python_name in type_str:
                     used_type_names.add(stub.python_name)
 
         for enum in plan.enums:
@@ -86,6 +102,12 @@ class PythonControlGenerator(CodeGenerator):
 
         lines.append("")
         lines.append("")
+
+        # Sub-control classes (emitted before the main class for forward refs)
+        for sub in self._flatten_sub_controls(plan.sub_controls):
+            lines.extend(self._render_sub_control(sub))
+            lines.append("")
+            lines.append("")
 
         # Class definition
         lines.append(f'@ft.control("{plan.control_name}")')
@@ -262,14 +284,19 @@ class PythonControlGenerator(CodeGenerator):
             lines.append(f'        """{doc}."""')
 
         # Build arguments dict using python_name as key (matches Dart side)
-        # For enum-typed params, use .value to serialize
+        # For enum-typed params, use .value to serialize (with None guard)
         enum_names = {e.python_name for e in plan.enums}
         args_dict: dict[str, str] = {}
         for p in method.params:
             base_type = p.python_type.replace("Optional[", "").rstrip("]")
             base_type = base_type.split("|")[0].strip()
             if base_type in enum_names:
-                args_dict[p.python_name] = f"{p.python_name}.value"
+                if p.is_optional or "None" in p.python_type:
+                    args_dict[p.python_name] = (
+                        f"{p.python_name}.value if {p.python_name} is not None else None"
+                    )
+                else:
+                    args_dict[p.python_name] = f"{p.python_name}.value"
             else:
                 args_dict[p.python_name] = p.python_name
 
@@ -308,5 +335,44 @@ class PythonControlGenerator(CodeGenerator):
                 lines.append(
                     f'        return await self._invoke_method("{method.dart_method_name}")'
                 )
+
+        return lines
+
+    @staticmethod
+    def _flatten_sub_controls(sub_controls: list[SubControlPlan]) -> list[SubControlPlan]:
+        """Flatten a recursive sub-control tree (leaves first, deduplicated)."""
+        result: list[SubControlPlan] = []
+        seen: set[str] = set()
+        for sc in sub_controls:
+            for nested in PythonControlGenerator._flatten_sub_controls(sc.sub_controls):
+                if nested.control_name not in seen:
+                    result.append(nested)
+                    seen.add(nested.control_name)
+            if sc.control_name not in seen:
+                result.append(sc)
+                seen.add(sc.control_name)
+        return result
+
+    def _render_sub_control(self, sub: SubControlPlan) -> list[str]:
+        """Render a sub-control class definition."""
+        lines: list[str] = []
+        lines.append(f'@ft.control("{sub.control_name}")')
+        lines.append(f"class {sub.control_name}(ft.Control):")
+        lines.append(f'    """{sub.control_name} sub-control."""')
+        lines.append("")
+
+        for prop in sub.properties:
+            lines.append(f"    {prop.python_name}: {prop.python_type} = {prop.default_value}")
+            lines.append("")
+
+        for event in sub.events:
+            attr = event.python_attr_name
+            evt_cls = event.event_class_name
+            lines.append(f"    {attr}: Optional[ft.EventHandler[{evt_cls}]] = None")
+            lines.append("")
+
+        # If no properties or events, add pass
+        if not sub.properties and not sub.events:
+            lines.append("    pass")
 
         return lines

@@ -7,7 +7,7 @@ and ``__all__`` definition.
 from __future__ import annotations
 
 from flet_pkg.core.generators.base import CodeGenerator
-from flet_pkg.core.models import GenerationPlan
+from flet_pkg.core.models import GenerationPlan, SubControlPlan
 from flet_pkg.core.parser import camel_to_snake
 
 
@@ -30,6 +30,11 @@ class PythonInitGenerator(CodeGenerator):
         # Main control import
         lines.append(f"from {plan.package_name}.{control_snake} import {plan.control_name}")
         all_exports.append(plan.control_name)
+
+        # Sub-control imports (from the same control module)
+        for sub in self._flatten_sub_controls(plan.sub_controls):
+            lines.append(f"from {plan.package_name}.{control_snake} import {sub.control_name}")
+            all_exports.append(sub.control_name)
 
         # Sub-module imports
         for sub in plan.sub_modules:
@@ -64,6 +69,13 @@ class PythonInitGenerator(CodeGenerator):
         lines.append(f"    # Main {kind}")
         lines.append(f'    "{plan.control_name}",')
 
+        # Group: Sub-controls
+        flat_subs = self._flatten_sub_controls(plan.sub_controls)
+        if flat_subs:
+            lines.append("    # Sub-controls")
+            for sub in flat_subs:
+                lines.append(f'    "{sub.control_name}",')
+
         # Group: Sub-modules
         if plan.sub_modules:
             lines.append("    # Sub-modules")
@@ -80,3 +92,18 @@ class PythonInitGenerator(CodeGenerator):
         lines.append("")
 
         return {"__init__.py": "\n".join(lines)}
+
+    @staticmethod
+    def _flatten_sub_controls(sub_controls: list[SubControlPlan]) -> list[SubControlPlan]:
+        """Flatten a recursive sub-control tree (leaves first, deduplicated)."""
+        result: list[SubControlPlan] = []
+        seen: set[str] = set()
+        for sc in sub_controls:
+            for nested in PythonInitGenerator._flatten_sub_controls(sc.sub_controls):
+                if nested.control_name not in seen:
+                    result.append(nested)
+                    seen.add(nested.control_name)
+            if sc.control_name not in seen:
+                result.append(sc)
+                seen.add(sc.control_name)
+        return result

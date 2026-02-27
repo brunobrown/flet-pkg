@@ -134,7 +134,7 @@ class PythonSubModuleGenerator(CodeGenerator):
             lines.append(f'        """{doc}."""')
 
         # Build arguments dict using python_name as key (matches Dart dispatch)
-        # For enum-typed params, use .value to serialize
+        # For enum-typed params, use .value to serialize (with None guard)
         enum_names = getattr(self, "_enum_names", set())
         args_dict: dict[str, str] = {}
         for p in method.params:
@@ -142,7 +142,12 @@ class PythonSubModuleGenerator(CodeGenerator):
             base_type = p.python_type.replace("Optional[", "").rstrip("]")
             base_type = base_type.split("|")[0].strip()
             if base_type in enum_names:
-                args_dict[p.python_name] = f"{p.python_name}.value"
+                if p.is_optional or "None" in p.python_type:
+                    args_dict[p.python_name] = (
+                        f"{p.python_name}.value if {p.python_name} is not None else None"
+                    )
+                else:
+                    args_dict[p.python_name] = f"{p.python_name}.value"
             else:
                 args_dict[p.python_name] = p.python_name
 

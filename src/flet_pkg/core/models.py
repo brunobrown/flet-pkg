@@ -75,6 +75,8 @@ class DartPackageAPI:
     """Mapping of type name → source package for re-exported public API types."""
     top_level_functions: list[DartMethod] = field(default_factory=list)
     """Top-level functions (not inside any class) from the Dart package."""
+    component_classes: list[DartClass] = field(default_factory=list)
+    """Non-widget classes referenced as constructor param types by widgets."""
 
 
 # ---------------------------------------------------------------------------
@@ -197,6 +199,26 @@ class StubDataClass:
 
 
 @dataclass
+class SubControlPlan:
+    """Plan for a sub-control class (compound widget child)."""
+
+    control_name: str
+    """PascalCase name for the generated class (e.g. ``ActionPane``)."""
+    dart_class_name: str
+    """Original Dart class name (e.g. ``ActionPane``)."""
+    properties: list[PropertyPlan] = field(default_factory=list)
+    events: list[EventPlan] = field(default_factory=list)
+    parent_property: str = ""
+    """snake_case property name on the parent (e.g. ``start_action_pane``)."""
+    is_list: bool = False
+    """True when the parent references this as ``List<T>``."""
+    sub_controls: list[SubControlPlan] = field(default_factory=list)
+    """Nested sub-controls (recursive, max depth 3)."""
+    depth: int = 1
+    """Nesting depth (1 = direct child of main widget)."""
+
+
+@dataclass
 class GenerationPlan:
     """Complete plan for code generation. Fed to generators."""
 
@@ -218,3 +240,5 @@ class GenerationPlan:
     control_name_snake: str = ""
     error_event_class: str = ""
     """Name of the error event class (e.g. ``OSErrorEvent``)."""
+    sub_controls: list[SubControlPlan] = field(default_factory=list)
+    """Sub-control plans for compound widgets (e.g. ActionPane for Slidable)."""

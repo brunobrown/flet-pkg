@@ -7,7 +7,7 @@ method dispatch from Python, event listener setup, and real SDK calls.
 from __future__ import annotations
 
 from flet_pkg.core.generators.base import CodeGenerator
-from flet_pkg.core.models import GenerationPlan, MethodPlan, SubModulePlan
+from flet_pkg.core.models import GenerationPlan, MethodPlan, SubControlPlan, SubModulePlan
 from flet_pkg.core.parser import camel_to_snake
 
 
@@ -199,7 +199,80 @@ class DartServiceGenerator(CodeGenerator):
         lines.append("}")
         lines.append("")
 
+        # Sub-control StatefulWidgets
+        for sub in self._flatten_sub_controls(plan.sub_controls):
+            lines.extend(self._render_sub_control_widget(sub, plan))
+            lines.append("")
+
         return "\n".join(lines)
+
+    # ------------------------------------------------------------------
+    # Sub-control widget rendering
+    # ------------------------------------------------------------------
+
+    def _render_sub_control_widget(self, sub: SubControlPlan, plan: GenerationPlan) -> list[str]:
+        """Render a StatefulWidget for a sub-control."""
+        widget_class = f"{sub.control_name}Widget"
+        state_class = f"_{sub.control_name}WidgetState"
+        lines: list[str] = []
+
+        lines.append(f"/// {sub.control_name} sub-control widget for {plan.control_name}.")
+        lines.append(f"class {widget_class} extends StatefulWidget {{")
+        lines.append("  final Control control;")
+        lines.append(f"  const {widget_class}({{super.key, required this.control}});")
+        lines.append("")
+        lines.append("  @override")
+        lines.append(f"  State<{widget_class}> createState() => {state_class}();")
+        lines.append("}")
+        lines.append("")
+
+        lines.append(f"class {state_class} extends State<{widget_class}> {{")
+        lines.append("  @override")
+        lines.append("  Widget build(BuildContext context) {")
+
+        # Read properties using typed getters
+        for prop in sub.properties:
+            dart_var = _to_camel_case(prop.python_name)
+            if prop.dart_getter:
+                getter_expr = prop.dart_getter.replace("control.", "widget.control.")
+                if getter_expr.startswith("buildWidget"):
+                    getter_expr = prop.dart_getter
+                lines.append(f"    final {dart_var} = {getter_expr};")
+            else:
+                lines.append(
+                    f'    final {dart_var} = widget.control.getString("{prop.python_name}");'
+                )
+
+        if sub.properties:
+            lines.append("")
+
+        # Build constructor call
+        lines.append(f"    return {sub.dart_class_name}(")
+        for prop in sub.properties:
+            dart_var = _to_camel_case(prop.python_name)
+            dart_param = prop.dart_name or prop.python_name
+            lines.append(f"      {dart_param}: {dart_var},")
+        lines.append("    );")
+        lines.append("  }")
+        lines.append("}")
+        lines.append("")
+
+        return lines
+
+    @staticmethod
+    def _flatten_sub_controls(sub_controls: list[SubControlPlan]) -> list[SubControlPlan]:
+        """Flatten a recursive sub-control tree (leaves first, deduplicated)."""
+        result: list[SubControlPlan] = []
+        seen: set[str] = set()
+        for sc in sub_controls:
+            for nested in DartServiceGenerator._flatten_sub_controls(sc.sub_controls):
+                if nested.control_name not in seen:
+                    result.append(nested)
+                    seen.add(nested.control_name)
+            if sc.control_name not in seen:
+                result.append(sc)
+                seen.add(sc.control_name)
+        return result
 
     # ------------------------------------------------------------------
     # Initialize method
@@ -433,24 +506,36 @@ class DartServiceGenerator(CodeGenerator):
             # Extract arguments using python_name as key (matches what Python sends)
             for p in method.params:
                 dart_type = _dart_cast_type(p.dart_type)
-                lines.append(f'    final {p.dart_name} = args["{p.python_name}"] as {dart_type};')
+                var_name = _safe_dart_var(p.dart_name)
+                lines.append(f'    final {var_name} = args["{p.python_name}"] as {dart_type};')
 
             # Build null check condition for required params
             required_params = [p for p in method.params if not p.is_optional]
 
             # Build SDK call arguments (use "name: name" for named params)
+            # Required params are passed directly; optional params use
+            # conditional forwarding so they are only sent when non-null.
             sdk_arg_parts = []
+            optional_parts = []
             for p in method.params:
+                v = _safe_dart_var(p.dart_name)
                 if p.is_optional:
-                    continue
-                if p.is_named:
-                    sdk_arg_parts.append(f"{p.dart_name}: {p.dart_name}")
+                    if p.is_named:
+                        optional_parts.append((p.dart_name, v))
                 else:
-                    sdk_arg_parts.append(p.dart_name)
+                    if p.is_named:
+                        sdk_arg_parts.append(f"{p.dart_name}: {v}")
+                    else:
+                        sdk_arg_parts.append(v)
+            # Add optional named params with null check
+            for orig_name, safe_name in optional_parts:
+                sdk_arg_parts.append(f"if ({safe_name} != null) {orig_name}: {safe_name}")
             sdk_args = ", ".join(sdk_arg_parts)
 
             if required_params:
-                checks = " && ".join(f"{p.dart_name} != null" for p in required_params)
+                checks = " && ".join(
+                    f"{_safe_dart_var(p.dart_name)} != null" for p in required_params
+                )
                 lines.append(f"    if ({checks}) {{")
 
                 # Determine return handling
@@ -558,6 +643,55 @@ def _to_camel_case(snake_name: str) -> str:
     """Convert snake_case to camelCase."""
     parts = snake_name.split("_")
     return parts[0] + "".join(p.capitalize() for p in parts[1:])
+
+
+_DART_RESERVED = frozenset(
+    {
+        "this",
+        "super",
+        "class",
+        "enum",
+        "extends",
+        "with",
+        "implements",
+        "abstract",
+        "as",
+        "assert",
+        "break",
+        "case",
+        "catch",
+        "const",
+        "continue",
+        "default",
+        "do",
+        "else",
+        "false",
+        "final",
+        "finally",
+        "for",
+        "if",
+        "in",
+        "is",
+        "new",
+        "null",
+        "return",
+        "switch",
+        "throw",
+        "true",
+        "try",
+        "var",
+        "void",
+        "while",
+        "yield",
+    }
+)
+
+
+def _safe_dart_var(name: str) -> str:
+    """Escape Dart reserved keywords used as variable names."""
+    if name in _DART_RESERVED:
+        return f"{name}_"
+    return name
 
 
 def _dart_cast_type(dart_type: str) -> str:

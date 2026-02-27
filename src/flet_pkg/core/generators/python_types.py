@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from flet_pkg.core.generators.base import CodeGenerator
 from flet_pkg.core.models import GenerationPlan
+from flet_pkg.core.parser import camel_to_snake
 
 
 class PythonTypesGenerator(CodeGenerator):
@@ -53,7 +54,9 @@ class PythonTypesGenerator(CodeGenerator):
                 lines.append(f'    """{enum.python_name} enum."""')
             lines.append("")
             for val_name, val_value in enum.values:
-                lines.append(f'    {val_name.upper()} = "{val_value}"')
+                # Convert camelCase to UPPER_SNAKE_CASE (e.g. sdkUnavailable → SDK_UNAVAILABLE)
+                py_name = camel_to_snake(val_name).upper()
+                lines.append(f'    {py_name} = "{val_value}"')
                 lines.append(f'    """{val_name}."""')
                 lines.append("")
             lines.append("")

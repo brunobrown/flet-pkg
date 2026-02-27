@@ -689,3 +689,195 @@ class TestFallback:
         main_names = [m.python_name for m in plan.main_methods]
         assert "do_thing" in main_names
         assert "help" in main_names
+
+
+class TestCompoundWidgetDetection:
+    """Tests for compound widget (sub-control) detection."""
+
+    def test_typed_sub_widget_detected(self, analyzer):
+        """A typed param like ActionPane? should become a SubControlPlan."""
+        api = DartPackageAPI(
+            classes=[
+                DartClass(
+                    name="Slidable",
+                    constructor_params=[
+                        DartParam(name="startActionPane", dart_type="ActionPane?"),
+                        DartParam(name="child", dart_type="Widget"),
+                    ],
+                    parent_class="StatefulWidget",
+                ),
+            ],
+            component_classes=[
+                DartClass(
+                    name="ActionPane",
+                    constructor_params=[
+                        DartParam(name="extentRatio", dart_type="double"),
+                        DartParam(name="children", dart_type="List<Widget>"),
+                    ],
+                ),
+            ],
+        )
+        plan = analyzer.analyze(api, "Slidable", "ui_control", "flutter_slidable", "flet_slidable")
+        assert len(plan.sub_controls) == 1
+        sc = plan.sub_controls[0]
+        assert sc.control_name == "ActionPane"
+        assert sc.parent_property == "start_action_pane"
+        assert sc.is_list is False
+
+    def test_list_sub_widget_detected(self, analyzer):
+        """A List<BarItem> param should become a SubControlPlan with is_list=True."""
+        api = DartPackageAPI(
+            classes=[
+                DartClass(
+                    name="NavBar",
+                    constructor_params=[
+                        DartParam(name="items", dart_type="List<BarItem>"),
+                    ],
+                    parent_class="StatefulWidget",
+                ),
+            ],
+            component_classes=[
+                DartClass(
+                    name="BarItem",
+                    constructor_params=[
+                        DartParam(name="title", dart_type="String"),
+                    ],
+                ),
+            ],
+        )
+        plan = analyzer.analyze(api, "NavBar", "ui_control", "nav_bar", "flet_nav_bar")
+        assert len(plan.sub_controls) == 1
+        sc = plan.sub_controls[0]
+        assert sc.control_name == "BarItem"
+        assert sc.is_list is True
+        assert sc.parent_property == "items"
+
+    def test_plain_widget_not_sub_control(self, analyzer):
+        """A Widget? child should remain ft.Control, not a SubControlPlan."""
+        api = DartPackageAPI(
+            classes=[
+                DartClass(
+                    name="MyWidget",
+                    constructor_params=[
+                        DartParam(name="child", dart_type="Widget?"),
+                        DartParam(name="title", dart_type="String"),
+                    ],
+                    parent_class="StatefulWidget",
+                ),
+            ],
+        )
+        plan = analyzer.analyze(api, "MyWidget", "ui_control", "my_widget", "flet_my_widget")
+        assert len(plan.sub_controls) == 0
+        # child should map to ft.Control | None, not a sub-control
+        child_prop = next((p for p in plan.properties if p.python_name == "child"), None)
+        assert child_prop is not None
+        assert "ft.Control" in child_prop.python_type
+
+    def test_max_depth_respected(self, analyzer):
+        """Nesting deeper than max_depth=3 should not recurse."""
+        # Create a 4-level deep chain: A → B → C → D
+        api = DartPackageAPI(
+            classes=[
+                DartClass(
+                    name="A",
+                    constructor_params=[
+                        DartParam(name="bChild", dart_type="B?"),
+                    ],
+                    parent_class="StatefulWidget",
+                ),
+            ],
+            component_classes=[
+                DartClass(
+                    name="B",
+                    constructor_params=[DartParam(name="cChild", dart_type="C?")],
+                ),
+                DartClass(
+                    name="C",
+                    constructor_params=[DartParam(name="dChild", dart_type="D?")],
+                ),
+                DartClass(
+                    name="D",
+                    constructor_params=[DartParam(name="value", dart_type="int")],
+                ),
+            ],
+        )
+        plan = analyzer.analyze(api, "A", "ui_control", "a_pkg", "flet_a")
+        # A → B (depth 1) → C (depth 2) → D (depth 3, max)
+        assert len(plan.sub_controls) == 1  # B
+        b = plan.sub_controls[0]
+        assert b.control_name == "B"
+        assert len(b.sub_controls) == 1  # C
+        c = b.sub_controls[0]
+        assert c.control_name == "C"
+        assert len(c.sub_controls) == 1  # D
+        d = c.sub_controls[0]
+        assert d.control_name == "D"
+        assert len(d.sub_controls) == 0  # depth 3 = max, no further nesting
+
+    def test_external_type_not_sub_control(self, analyzer):
+        """Types not in the same package should NOT become sub-controls."""
+        api = DartPackageAPI(
+            classes=[
+                DartClass(
+                    name="MyWidget",
+                    constructor_params=[
+                        DartParam(name="data", dart_type="ExternalClass?"),
+                    ],
+                    parent_class="StatefulWidget",
+                ),
+            ],
+            # No component_classes — ExternalClass is from another package
+        )
+        plan = analyzer.analyze(api, "MyWidget", "ui_control", "my_widget", "flet_my_widget")
+        assert len(plan.sub_controls) == 0
+
+    def test_backward_compat_simple_widget(self, analyzer):
+        """Simple widget without sub-controls should have no regression."""
+        api = DartPackageAPI(
+            classes=[
+                DartClass(
+                    name="CameraPreview",
+                    constructor_params=[
+                        DartParam(name="child", dart_type="Widget?"),
+                        DartParam(name="fit", dart_type="BoxFit?"),
+                        DartParam(name="width", dart_type="double"),
+                    ],
+                    parent_class="StatefulWidget",
+                ),
+            ],
+        )
+        plan = analyzer.analyze(api, "CameraPreview", "ui_control", "camera", "flet_camera")
+        assert len(plan.sub_controls) == 0
+        assert len(plan.properties) > 0
+        prop_names = [p.python_name for p in plan.properties]
+        assert "fit" in prop_names
+        assert "width" in prop_names
+
+    def test_sub_control_property_type_not_sanitized(self, analyzer):
+        """Sub-control types should appear as class names, not dict | None."""
+        api = DartPackageAPI(
+            classes=[
+                DartClass(
+                    name="Slidable",
+                    constructor_params=[
+                        DartParam(name="actionPane", dart_type="ActionPane?"),
+                        DartParam(name="child", dart_type="Widget"),
+                    ],
+                    parent_class="StatefulWidget",
+                ),
+            ],
+            component_classes=[
+                DartClass(
+                    name="ActionPane",
+                    constructor_params=[
+                        DartParam(name="extentRatio", dart_type="double"),
+                    ],
+                ),
+            ],
+        )
+        plan = analyzer.analyze(api, "Slidable", "ui_control", "flutter_slidable", "flet_slidable")
+        # The property type should be ActionPane | None, not dict | None
+        ap_prop = next((p for p in plan.properties if p.python_name == "action_pane"), None)
+        assert ap_prop is not None
+        assert "ActionPane" in ap_prop.python_type
+        assert "dict" not in ap_prop.python_type

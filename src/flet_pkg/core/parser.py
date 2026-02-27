@@ -46,6 +46,19 @@ UI_METHODS = {
     "instance",
     "callback",
     "refuseInCallingOnInvitationReceived",
+    # Dart built-in / internal methods that are NOT public API
+    "compute",  # dart:async compute() for isolate spawning
+    "identical",  # dart:core identical() object identity check
+    "addIfNotNull",  # internal utility for building argument maps
+    "getHashCode",  # Object.hashCode accessor (also filtered as hashCode)
+    "hashCode",  # Object.hashCode
+    "getFromJsonFunction",  # internal JSON serialization helper
+    "runtimeType",  # Object.runtimeType
+    "toMap",  # internal serialization
+    "copyWith",  # internal copy constructor
+    "compareTo",  # Comparable.compareTo
+    "removeDuplicates",  # internal dedup utility
+    "fromJsonFunction",  # internal serialization factory
 }
 
 LIFECYCLE_METHODS = {
@@ -103,6 +116,43 @@ _INTERNAL_WIDGET_SUFFIXES = (
     "Private",
     "Impl",
     "Utils",
+)
+
+# Dart keywords that the method regex might capture as a "return type"
+# when matching method calls inside method bodies (e.g. `await foo(`).
+_DART_KEYWORDS = frozenset(
+    {
+        "await",
+        "return",
+        "final",
+        "var",
+        "const",
+        "throw",
+        "if",
+        "else",
+        "for",
+        "while",
+        "try",
+        "catch",
+        "new",
+        "yield",
+        "switch",
+        "case",
+        "break",
+        "continue",
+        "super",
+        "this",
+        "assert",
+        "class",
+        "enum",
+        "extends",
+        "implements",
+        "with",
+        "abstract",
+        "as",
+        "in",
+        "is",
+    }
 )
 
 # Parent classes that indicate a platform implementation (not a public API).
@@ -557,9 +607,9 @@ def _parse_typedefs(content: str) -> dict[str, str]:
 # Enum parsing
 # ---------------------------------------------------------------------------
 
-_ENUM_RE = re.compile(
+_ENUM_HEAD_RE = re.compile(
     r"(?:///[^\n]*\n|/\*\*.*?\*/\s*)?"
-    r"enum\s+(\w+)\s*\{([^}]*)\}",
+    r"enum\s+(\w+)\s*\{",
     re.DOTALL,
 )
 
@@ -567,9 +617,13 @@ _ENUM_RE = re.compile(
 def _parse_enums(content: str) -> list[DartEnum]:
     """Extract enum declarations from Dart source."""
     enums: list[DartEnum] = []
-    for match in _ENUM_RE.finditer(content):
+    for match in _ENUM_HEAD_RE.finditer(content):
         name = match.group(1)
-        body = match.group(2)
+        # Use balanced brace extraction to handle enums with method bodies
+        open_pos = match.end() - 1  # position of the '{'
+        body = _extract_balanced_braces(content, open_pos)
+        if body is None:
+            continue
 
         # Extract docstring before enum
         doc_match = re.search(
@@ -581,12 +635,16 @@ def _parse_enums(content: str) -> list[DartEnum]:
 
         # Parse values: strip doc comments (/// lines) before splitting
         cleaned_body = re.sub(r"[ \t]*///[^\n]*", "", body)
+
+        # Enhanced enums use ';' to separate values from methods/constructors.
+        # Split on first ';' to get just the values portion.
+        values_part = cleaned_body.split(";")[0]
+
         values = []
-        for line in cleaned_body.split(","):
+        for line in values_part.split(","):
             val = line.strip()
             val = re.sub(r"//.*$", "", val).strip()
-            val = re.sub(r";.*$", "", val).strip()
-            # Skip constructor-like entries (e.g. `value(1)`)
+            # Strip constructor-like entries (e.g. `value(1)`)
             val = re.sub(r"\(.*\)$", "", val).strip()
             if val and val.isidentifier() and not val.startswith("_"):
                 values.append(val)
@@ -595,6 +653,23 @@ def _parse_enums(content: str) -> list[DartEnum]:
             enums.append(DartEnum(name=name, values=values, docstring=docstring))
 
     return enums
+
+
+def _extract_balanced_braces(text: str, open_pos: int) -> str | None:
+    """Extract content between balanced braces starting at open_pos."""
+    if open_pos >= len(text) or text[open_pos] != "{":
+        return None
+    depth = 1
+    i = open_pos + 1
+    while i < len(text) and depth > 0:
+        if text[i] == "{":
+            depth += 1
+        elif text[i] == "}":
+            depth -= 1
+        i += 1
+    if depth != 0:
+        return None
+    return text[open_pos + 1 : i - 1]
 
 
 # ---------------------------------------------------------------------------
@@ -781,6 +856,12 @@ def _parse_class_methods(class_block: str, skip_filter: bool = True) -> list[Dar
         is_getter = accessor is not None and accessor.strip() == "get"
         is_setter = accessor is not None and accessor.strip() == "set"
         method_name = m.group(4)
+
+        # Skip matches where the "return type" is actually a Dart keyword.
+        # This happens when the regex matches a method call inside a body:
+        # e.g. "await isSkinTemperatureAvailable(" → return_type="await"
+        if return_type.rstrip("?") in _DART_KEYWORDS:
+            continue
 
         # Extract balanced parameter text from opening paren
         open_pos = m.end() - 1  # position of the '('
@@ -1025,6 +1106,9 @@ def _parse_top_level_functions(
         # Skip known non-function patterns (import, export, etc.)
         if return_type in ("import", "export", "part", "library", "typedef"):
             continue
+        # Skip Dart keywords captured as "return type" from method body calls
+        if return_type.rstrip("?") in _DART_KEYWORDS:
+            continue
         # Validate return type: must be a known type or start with uppercase
         if (
             return_type not in _VALID_RETURN_TYPES
@@ -1077,6 +1161,49 @@ def _parse_top_level_functions(
 # ---------------------------------------------------------------------------
 # Main parse functions
 # ---------------------------------------------------------------------------
+
+
+def _collect_component_classes(
+    widget_classes: list[DartClass],
+    all_parsed: dict[str, tuple[str, str]],
+    helper_names: set[str],
+) -> list[DartClass]:
+    """Identify non-widget classes referenced by widget constructor params.
+
+    Scans widget constructor parameter types for class names that exist
+    in the parsed source but were not included as widgets or helpers.
+    These become candidates for sub-control generation.
+    """
+    # Collect type names from widget constructor params
+    referenced: set[str] = set()
+    for widget in widget_classes:
+        for param in widget.constructor_params:
+            base = re.sub(r"[?<].*", "", param.dart_type).strip()
+            generic = re.search(r"<(\w+)>", param.dart_type)
+            if generic:
+                referenced.add(generic.group(1))
+            if base:
+                referenced.add(base)
+
+    # Filter: in same package (in all_parsed), not already a widget/helper
+    widget_names = {w.name for w in widget_classes}
+    components: list[DartClass] = []
+    for name in sorted(referenced):
+        if name in widget_names or name in helper_names:
+            continue
+        if name not in all_parsed:
+            continue
+        block, src = all_parsed[name]
+        ctor_params = _parse_constructor_params(name, block)
+        if ctor_params:
+            components.append(
+                DartClass(
+                    name=name,
+                    constructor_params=ctor_params,
+                    source_file=src,
+                )
+            )
+    return components
 
 
 def detect_extension_type(package_path: Path) -> str:
@@ -1132,6 +1259,8 @@ def parse_dart_package_api(
     all_helpers: list[DartClass] = []
     all_typedefs: dict[str, str] = {}
     all_top_level_functions: list[DartMethod] = []
+    # Track all parsed class blocks for component class resolution
+    all_parsed_blocks: dict[str, tuple[str, str]] = {}  # class_name → (block, source_file)
 
     for dart_file in lib_dir.rglob("*.dart"):
         content = dart_file.read_text(encoding="utf-8")
@@ -1186,6 +1315,10 @@ def parse_dart_package_api(
                 or parent_class in _INTERNAL_PARENT_BASES
             ):
                 continue
+
+            # Track all viable classes for component resolution
+            if include_widgets and class_name not in all_parsed_blocks:
+                all_parsed_blocks[class_name] = (class_block, relative_path)
 
             # Helper classes (Event, Data, Result, State, etc.) or data model classes
             if _is_helper_class(class_name, parent_class):
@@ -1246,6 +1379,15 @@ def parse_dart_package_api(
     # Parse re-exported types from barrel files
     reexported = _parse_reexports(lib_dir)
 
+    # Collect component classes (non-widget classes referenced by widget params)
+    component_classes: list[DartClass] = []
+    if include_widgets and all_parsed_blocks:
+        component_classes = _collect_component_classes(
+            all_classes,
+            all_parsed_blocks,
+            {h.name for h in all_helpers},
+        )
+
     return DartPackageAPI(
         classes=all_classes,
         enums=all_enums,
@@ -1253,4 +1395,5 @@ def parse_dart_package_api(
         typedefs=all_typedefs,
         reexported_types=reexported,
         top_level_functions=all_top_level_functions,
+        component_classes=component_classes,
     )

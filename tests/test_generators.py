@@ -14,6 +14,7 @@ from flet_pkg.core.models import (
     MethodPlan,
     ParamPlan,
     PropertyPlan,
+    SubControlPlan,
     SubModulePlan,
 )
 
@@ -431,3 +432,102 @@ class TestPythonControlFieldImport:
         files = gen.generate(plan)
         content = files["my_widget.py"]
         assert "from dataclasses import field" not in content
+
+
+class TestSubControlGeneration:
+    """Tests for compound widget (sub-control) code generation."""
+
+    @pytest.fixture
+    def slidable_plan(self):
+        """A GenerationPlan with sub-controls (flutter_slidable-like)."""
+        return GenerationPlan(
+            control_name="Slidable",
+            package_name="flet_slidable",
+            base_class="ft.LayoutControl",
+            flutter_package="flutter_slidable",
+            dart_import="package:flutter_slidable/flutter_slidable.dart",
+            dart_main_class="Slidable",
+            properties=[
+                PropertyPlan(
+                    python_name="start_action_pane",
+                    python_type="ActionPane | None",
+                    default_value="None",
+                    dart_name="startActionPane",
+                    dart_getter='buildWidget("start_action_pane")',
+                ),
+                PropertyPlan(
+                    python_name="child",
+                    python_type="ft.Control | None",
+                    default_value="None",
+                    dart_name="child",
+                    dart_getter='buildWidget("child")',
+                ),
+                PropertyPlan(
+                    python_name="enabled",
+                    python_type="bool",
+                    default_value="True",
+                    dart_name="enabled",
+                    dart_getter='control.getBool("enabled", false)!',
+                ),
+            ],
+            sub_controls=[
+                SubControlPlan(
+                    control_name="ActionPane",
+                    dart_class_name="ActionPane",
+                    properties=[
+                        PropertyPlan(
+                            python_name="extent_ratio",
+                            python_type="ft.Number | None",
+                            default_value="None",
+                            dart_name="extentRatio",
+                            dart_getter='control.getDouble("extent_ratio")',
+                        ),
+                        PropertyPlan(
+                            python_name="children",
+                            python_type="list[ft.Control]",
+                            default_value="field(default_factory=list)",
+                            dart_name="children",
+                            dart_getter='buildWidgets("children")',
+                        ),
+                    ],
+                    parent_property="start_action_pane",
+                    is_list=False,
+                    depth=1,
+                ),
+            ],
+        )
+
+    def test_python_sub_control_class(self, slidable_plan):
+        """Sub-control class should be generated with @ft.control decorator."""
+        gen = PythonControlGenerator()
+        files = gen.generate(slidable_plan)
+        content = files["slidable.py"]
+        assert '@ft.control("ActionPane")' in content
+        assert "class ActionPane(ft.Control):" in content
+        assert "extent_ratio:" in content
+
+    def test_python_sub_control_before_main(self, slidable_plan):
+        """Sub-control class should appear before the main class."""
+        gen = PythonControlGenerator()
+        files = gen.generate(slidable_plan)
+        content = files["slidable.py"]
+        sub_pos = content.index("class ActionPane")
+        main_pos = content.index("class Slidable")
+        assert sub_pos < main_pos
+
+    def test_dart_sub_control_widget(self, slidable_plan):
+        """Dart StatefulWidget should be generated for sub-control."""
+        gen = DartServiceGenerator()
+        files = gen.generate(slidable_plan)
+        content = files["slidable_widget.dart"]
+        assert "class ActionPaneWidget extends StatefulWidget" in content
+        assert "_ActionPaneWidgetState" in content
+        assert "ActionPane(" in content
+
+    def test_init_exports_sub_controls(self, slidable_plan):
+        """__init__.py should export sub-control classes."""
+        gen = PythonInitGenerator()
+        files = gen.generate(slidable_plan)
+        content = files["__init__.py"]
+        assert "from flet_slidable.slidable import ActionPane" in content
+        assert '"ActionPane"' in content

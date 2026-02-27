@@ -146,6 +146,10 @@ class GenerationPipeline:
                 f"{len(plan.sub_modules)} sub-modules, "
                 f"{len(plan.events)} events[/success]"
             )
+            if plan.sub_controls:
+                n_sub = len(plan.sub_controls)
+                names = ", ".join(sc.control_name for sc in plan.sub_controls)
+                console.print(f"  [success]Detected {n_sub} sub-control(s): {names}[/success]")
         except Exception as e:
             result.warnings.append(f"Analysis failed: {e}")
             console.print(f"  [warning]Analysis failed: {e}[/warning]")
