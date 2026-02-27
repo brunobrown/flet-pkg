@@ -1,4 +1,4 @@
-<p align="center"><img src="https://github.com/user-attachments/assets/ac357615-d650-4dd0-85e4-5c4746d1d68b" width="500" height="500" alt="Flet PKG"></p>
+<p align="center"><img src="https://github.com/user-attachments/assets/06ef3010-78b7-4007-b5f7-40cf0201cf3a" width="500" height="500" alt="Flet PKG"></p>
 
 <p align="center">
   <strong>Generates complete, ready-to-develop Flet extensions with Python + Flutter/Dart code, following Flet 0.80.x+ patterns.</strong>
