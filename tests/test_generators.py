@@ -89,7 +89,7 @@ def sample_plan():
         enums=[
             EnumPlan(
                 python_name="OSLogLevel",
-                values=[("NONE", "none"), ("DEBUG", "debug"), ("INFO", "info")],
+                values=[("NONE", "none", ""), ("DEBUG", "debug", ""), ("INFO", "info", "")],
                 docstring="Log levels.",
             ),
         ],

@@ -59,6 +59,11 @@ class PythonInitGenerator(CodeGenerator):
         lines.append(")")
         all_exports.extend(type_names)
 
+        # Console imports (conditional)
+        if plan.include_console:
+            lines.append(f"from {plan.package_name}.console import DebugConsole, setup_logging")
+            all_exports.extend(["DebugConsole", "setup_logging"])
+
         lines.append("")
 
         # __all__
@@ -82,10 +87,20 @@ class PythonInitGenerator(CodeGenerator):
             for sub in plan.sub_modules:
                 lines.append(f'    "{sub.class_name}",')
 
+        # Group: Debug console
+        if plan.include_console:
+            lines.append("    # Debug console")
+            lines.append('    "DebugConsole",')
+            lines.append('    "setup_logging",')
+
         # Group: Types and events
+        sub_control_names = {s.control_name for s in flat_subs}
+        sub_module_names = {s.class_name for s in plan.sub_modules}
+        console_names = {"DebugConsole", "setup_logging"} if plan.include_console else set()
+        already_listed = {plan.control_name} | sub_control_names | sub_module_names | console_names
         lines.append("    # Types and events")
         for name in sorted(set(all_exports)):
-            if name != plan.control_name and name not in [s.class_name for s in plan.sub_modules]:
+            if name not in already_listed:
                 lines.append(f'    "{name}",')
 
         lines.append("]")

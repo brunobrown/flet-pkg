@@ -83,7 +83,15 @@ def sample_api():
         enums=[
             DartEnum(
                 name="OSLogLevel",
-                values=["none", "fatal", "error", "warn", "info", "debug", "verbose"],
+                values=[
+                    ("none", ""),
+                    ("fatal", ""),
+                    ("error", ""),
+                    ("warn", ""),
+                    ("info", ""),
+                    ("debug", ""),
+                    ("verbose", ""),
+                ],
             ),
         ],
     )

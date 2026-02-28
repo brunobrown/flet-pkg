@@ -184,7 +184,7 @@ class PackageAnalyzer:
             plan.enums.append(
                 EnumPlan(
                     python_name=dart_enum.name,
-                    values=[(v, v.lower()) for v in dart_enum.values],
+                    values=[(v, v.lower(), doc) for v, doc in dart_enum.values],
                     docstring=dart_enum.docstring,
                 )
             )
@@ -259,7 +259,7 @@ class PackageAnalyzer:
                 continue
 
             # Build lookup maps from the platform_interface source
-            enum_map: dict[str, list[str]] = {}
+            enum_map: dict[str, list[tuple[str, str]]] = {}
             for dart_enum in platform_api.enums:
                 enum_map[dart_enum.name] = dart_enum.values
 
@@ -322,7 +322,7 @@ class PackageAnalyzer:
                 if enum_plan.python_name in enum_map:
                     real_values = enum_map[enum_plan.python_name]
                     if real_values:
-                        enum_plan.values = [(v, v.lower()) for v in real_values]
+                        enum_plan.values = [(v, v.lower(), doc) for v, doc in real_values]
                         enum_plan.docstring = ""
 
             # Convert stub data classes to enums when platform_interface
@@ -337,7 +337,7 @@ class PackageAnalyzer:
                         plan.enums.append(
                             EnumPlan(
                                 python_name=stub.python_name,
-                                values=[(v, v.lower()) for v in real_values],
+                                values=[(v, v.lower(), doc) for v, doc in real_values],
                             )
                         )
                         stubs_to_remove.append(stub)
@@ -795,12 +795,17 @@ class PackageAnalyzer:
         for cls in api.classes:
             if cls.name.lower() == control_lower:
                 return cls.name
-        # Priority 2: Match without "Flutter" suffix
+        # Priority 2: Match without "Flutter" prefix
         for cls in api.classes:
             name = cls.name.lower()
             if name == control_lower.replace("flutter", ""):
                 return cls.name
-        # Priority 3: Shortest class that starts with control name prefix
+        # Priority 3: Flutter{Name}Plugin pattern (e.g. FlutterLocalNotificationsPlugin)
+        for cls in api.classes:
+            stripped = cls.name.lower().removeprefix("flutter").removesuffix("plugin")
+            if stripped == control_lower:
+                return cls.name
+        # Priority 4: Shortest class that starts with control name prefix
         candidates = [cls for cls in api.classes if cls.name.lower().startswith(control_lower)]
         if candidates:
             return min(candidates, key=lambda c: len(c.name)).name
@@ -819,6 +824,11 @@ class PackageAnalyzer:
 
         # Skip the main class itself
         if cls_lower == control_name_lower:
+            return None
+
+        # Skip Flutter{Name}Plugin pattern — it IS the main class
+        stripped = cls_lower.removeprefix("flutter").removesuffix("plugin")
+        if stripped == control_name_lower:
             return None
 
         # Check prefix match: e.g., OneSignalUser -> "user"
@@ -1274,6 +1284,7 @@ class PackageAnalyzer:
                     is_optional=not p.required and p.named,
                     is_named=p.named,
                     default=p.default,
+                    docstring=p.docstring,
                 )
             )
 
@@ -1692,6 +1703,9 @@ class PackageAnalyzer:
             "Permission",
             "Accuracy",
             "Direction",
+            "Priority",
+            "Visibility",
+            "Setting",  # singular (e.g. AppleNotificationSetting)
         )
         # Suffixes that indicate data/params classes
         _DATA_SUFFIXES = (
@@ -1700,15 +1714,25 @@ class PackageAnalyzer:
             "Options",
             "Configuration",
             "Config",
-            "Settings",
+            "Settings",  # plural (e.g. NotificationSettings)
             "Info",
             "Response",
             "Position",
             "Data",
             "File",
+            "Message",
+            "Notification",
+            "Sound",
         )
         # Suffixes to skip (widget/callback types not useful on Python side)
-        _SKIP_SUFFIXES = ("Builder", "Delegate", "Callback", "Link", "Target")
+        _SKIP_SUFFIXES = (
+            "Builder",
+            "Delegate",
+            "Callback",
+            "Handler",
+            "Link",
+            "Target",
+        )
 
         for type_name, _source_pkg in api.reexported_types.items():
             if type_name in generated_type_names:
@@ -1726,7 +1750,7 @@ class PackageAnalyzer:
                 plan.enums.append(
                     EnumPlan(
                         python_name=type_name,
-                        values=[("UNKNOWN", "unknown")],
+                        values=[("UNKNOWN", "unknown", "")],
                         docstring=(
                             f"{type_name} enum (stub — values should be filled "
                             f"from the {_source_pkg} platform interface)."
@@ -1754,7 +1778,7 @@ class PackageAnalyzer:
                 plan.enums.append(
                     EnumPlan(
                         python_name=type_name,
-                        values=[("UNKNOWN", "unknown")],
+                        values=[("UNKNOWN", "unknown", "")],
                         docstring=(
                             f"{type_name} enum (stub — values should be filled "
                             f"from the {_source_pkg} platform interface)."

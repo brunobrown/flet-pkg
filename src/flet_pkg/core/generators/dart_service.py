@@ -418,7 +418,7 @@ class DartServiceGenerator(CodeGenerator):
             dart_name = enum.python_name
             lines.append(f"  {dart_name} _parse{dart_name}(String value) {{")
             lines.append("    return switch (value.toLowerCase()) {")
-            for val_name, val_value in enum.values:
+            for val_name, val_value, _val_doc in enum.values:
                 lines.append(f'      "{val_value}" => {dart_name}.{val_name},')
             # Default fallback
             if enum.values:

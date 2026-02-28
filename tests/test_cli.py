@@ -46,7 +46,7 @@ class TestCLI:
                 "--output",
                 str(tmp_path),
             ],
-            input="flet-onesignal\nflet_onesignal\nOneSignal\nA test\nAuthor\n",
+            input="flet-onesignal\nflet_onesignal\nOneSignal\nA test\nAuthor\ny\n",
         )
         assert result.exit_code == 0
         assert (tmp_path / "flet-onesignal").is_dir()
@@ -65,7 +65,7 @@ class TestCLI:
                 "--output",
                 str(tmp_path),
             ],
-            input="flet-spinkit\nflet_spinkit\nSpinkit\nA widget\nAuthor\n",
+            input="flet-spinkit\nflet_spinkit\nSpinkit\nA widget\nAuthor\ny\n",
         )
         assert result.exit_code == 0
         assert (tmp_path / "flet-spinkit").is_dir()

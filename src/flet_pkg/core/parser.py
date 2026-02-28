@@ -93,8 +93,6 @@ UI_CLASS_SUFFIXES = (
     "Background",
     "Internal",
     "Instance",
-    "Plugins",
-    "Plugin",
     "ServiceAPIPrivateImpl",
     "Utils",
     "Painter",
@@ -250,23 +248,36 @@ def camel_to_snake(name: str) -> str:
 
 def _should_skip_class(class_name: str, docstring: str = "", parent_class: str = "") -> bool:
     """Check if a class should be skipped entirely (not parsed at all)."""
-    return (
-        class_name.startswith("_")
-        or class_name.endswith(UI_CLASS_SUFFIXES)
-        or "nodoc" in docstring.lower()
-        or "internal" in docstring.lower()
-        or _is_platform_impl(parent_class)
-        or parent_class in WIDGET_BASES
-        or parent_class in _INTERNAL_PARENT_BASES
-    )
+    if class_name.startswith("_"):
+        return True
+    if class_name.endswith(UI_CLASS_SUFFIXES):
+        return True
+    if "nodoc" in docstring.lower() or "internal" in docstring.lower():
+        return True
+    if _is_platform_impl(parent_class):
+        return True
+    if parent_class in WIDGET_BASES or parent_class in _INTERNAL_PARENT_BASES:
+        return True
+    # Platform-specific Plugin subclass: e.g. AndroidFlutterLocalNotificationsPlugin
+    # extends MethodChannelFlutterLocalNotificationsPlugin → skip.
+    # But keep the main Plugin class (no parent or non-Plugin parent).
+    if class_name.endswith("Plugin") and parent_class.endswith("Plugin"):
+        return True
+    return False
 
 
 def _is_platform_impl(parent_class: str) -> bool:
     """Check if a parent class indicates a platform implementation."""
     if not parent_class:
         return False
-    # Direct match or ends with a known platform base suffix
-    return parent_class.endswith(PLATFORM_IMPL_BASES)
+    # Specific suffixes that always indicate platform interfaces
+    if parent_class.endswith(("PlatformInterface", "MethodChannelPlatform")):
+        return True
+    # FooPlatform is a platform impl, but FooPluginPlatform (e.g.
+    # FirebasePluginPlatform) is a generic SDK base — keep children.
+    if parent_class.endswith("Platform") and "Plugin" not in parent_class:
+        return True
+    return False
 
 
 def _is_helper_class(class_name: str, parent_class: str = "") -> bool:
@@ -377,10 +388,81 @@ def _extract_balanced_parens(text: str, open_pos: int) -> str | None:
 
 
 def _clean_docstring(match: re.Match) -> str:
+    """Clean a Dart docstring, preserving paragraphs, lists, and code blocks."""
     doc = match.group(1) or match.group(2) or ""
-    doc = re.sub(r"///+", "", doc)
-    doc = re.sub(r"/\*\*|\*/", "", doc)
-    return doc.strip().replace("\n", " ").replace("  ", " ")
+    # Remove /** ... */ markers
+    doc = re.sub(r"^/\*\*\s*", "", doc)
+    doc = re.sub(r"\s*\*/$", "", doc)
+    doc = re.sub(r"^\s*\*\s?", "", doc, flags=re.MULTILINE)
+
+    lines = doc.split("\n")
+    cleaned = [re.sub(r"^\s*///+\s?", "", ln) for ln in lines]
+
+    result_parts: list[str] = []
+    paragraph: list[str] = []
+    in_code = False
+
+    def flush():
+        if paragraph:
+            result_parts.append(re.sub(r"  +", " ", " ".join(paragraph)).strip())
+            paragraph.clear()
+
+    for line in cleaned:
+        s = line.rstrip()
+        if s.startswith("```"):
+            flush()
+            result_parts.append(s)
+            in_code = not in_code
+            continue
+        if in_code:
+            result_parts.append(line.rstrip())
+            continue
+        if not s:
+            flush()
+            result_parts.append("")
+            continue
+        if re.match(r"^\s*[-*]\s", s):
+            flush()
+            result_parts.append(s)
+            continue
+        paragraph.append(s)
+
+    flush()
+    text = "\n".join(result_parts).strip()
+    return re.sub(r"\n{3,}", "\n\n", text)
+
+
+def _clean_enum_value_doc(lines: list[str]) -> str:
+    """Collapse /// doc-comment lines above an enum value into a single line."""
+    if not lines:
+        return ""
+    return re.sub(r"  +", " ", " ".join(ln.strip() for ln in lines)).strip()
+
+
+def _extract_param_docs(params_raw: str) -> dict[str, str]:
+    """Extract per-parameter docstrings from /// comments within a param list."""
+    docs: dict[str, str] = {}
+    pending: list[str] = []
+    for line in params_raw.split("\n"):
+        stripped = line.strip()
+        doc_m = re.match(r"^///+\s?(.*)", stripped)
+        if doc_m:
+            pending.append(doc_m.group(1))
+            continue
+        if pending and stripped:
+            clean = re.sub(r"//.*$", "", stripped).strip().rstrip(",").strip()
+            clean = re.sub(r"@\w+(\([^)]*\))?\s*", "", clean).strip()
+            clean = re.sub(r"^required\s+", "", clean).strip()
+            clean = re.sub(r"\s*=\s*.*$", "", clean).strip()
+            parts = clean.split()
+            if parts:
+                name = parts[-1].strip("?,")
+                if name.isidentifier():
+                    docs[name] = re.sub(r"  +", " ", " ".join(pending)).strip()
+            pending = []
+        elif not stripped:
+            pending = []
+    return docs
 
 
 def _extract_code_block(content: str) -> str | None:
@@ -491,6 +573,12 @@ def _parse_param(param_str: str, is_named_section: bool) -> DartParam | None:
 
 def _parse_params_string(params_raw: str) -> list[DartParam]:
     """Parse a full Dart parameter list string into DartParam objects."""
+    # Capture per-parameter /// docstrings BEFORE stripping them
+    param_docs = _extract_param_docs(params_raw)
+    # Strip inline /// and // doc comments that appear between parameters
+    # (e.g. firebase_messaging's requestPermission has /// on each param).
+    params_raw = re.sub(r"///[^\n]*", "", params_raw)
+    params_raw = re.sub(r"//[^\n]*", "", params_raw)
     params_raw = params_raw.strip()
     if not params_raw:
         return []
@@ -552,6 +640,8 @@ def _parse_params_string(params_raw: str) -> list[DartParam]:
     for seg, named in segments:
         param = _parse_param(seg, named)
         if param:
+            if param.name in param_docs:
+                param.docstring = param_docs[param.name]
             result.append(param)
 
     return result
@@ -633,21 +723,27 @@ def _parse_enums(content: str) -> list[DartEnum]:
         )
         docstring = _clean_docstring(doc_match) if doc_match else ""
 
-        # Parse values: strip doc comments (/// lines) before splitting
-        cleaned_body = re.sub(r"[ \t]*///[^\n]*", "", body)
-
-        # Enhanced enums use ';' to separate values from methods/constructors.
-        # Split on first ';' to get just the values portion.
-        values_part = cleaned_body.split(";")[0]
-
-        values = []
-        for line in values_part.split(","):
-            val = line.strip()
-            val = re.sub(r"//.*$", "", val).strip()
-            # Strip constructor-like entries (e.g. `value(1)`)
-            val = re.sub(r"\(.*\)$", "", val).strip()
-            if val and val.isidentifier() and not val.startswith("_"):
-                values.append(val)
+        # Parse values with per-value docstrings from /// comments
+        values_part = body.split(";")[0]
+        values: list[tuple[str, str]] = []
+        pending_doc: list[str] = []
+        for line in values_part.split("\n"):
+            stripped = line.strip()
+            doc_m = re.match(r"^///+\s?(.*)", stripped)
+            if doc_m:
+                pending_doc.append(doc_m.group(1))
+                continue
+            stripped = re.sub(r"//.*$", "", stripped).strip()
+            for piece in stripped.split(","):
+                val = piece.strip()
+                val = re.sub(r"\(.*\)$", "", val).strip()
+                if val and val.isidentifier() and not val.startswith("_"):
+                    values.append((val, _clean_enum_value_doc(pending_doc)))
+                    pending_doc = []
+                elif not val:
+                    pass
+                else:
+                    pending_doc = []
 
         if values:
             enums.append(DartEnum(name=name, values=values, docstring=docstring))
@@ -703,9 +799,8 @@ def _parse_constructor_params(class_name: str, class_block: str) -> list[DartPar
         if not field_name.startswith("_"):
             field_types[field_name] = raw_type
             if doc_lines:
-                field_docs[field_name] = (
-                    re.sub(r"///+\s*", "", doc_lines).strip().replace("\n", " ")
-                )
+                cleaned_parts = [re.sub(r"^\s*///+\s?", "", ln) for ln in doc_lines.split("\n")]
+                field_docs[field_name] = re.sub(r"  +", " ", " ".join(cleaned_parts)).strip()
 
     # Step 2: Find the primary constructor
     ctor_re = re.compile(
@@ -718,6 +813,9 @@ def _parse_constructor_params(class_name: str, class_block: str) -> list[DartPar
     params_raw = _extract_balanced_parens(class_block, ctor_match.end() - 1)
     if params_raw is None:
         return []
+
+    # Capture per-parameter /// docstrings BEFORE stripping them
+    ctor_param_docs = _extract_param_docs(params_raw)
 
     # Strip all comments (// and ///) and template tags ({@...})
     params_raw = re.sub(r"//[^\n]*", "", params_raw)
@@ -805,6 +903,9 @@ def _parse_constructor_params(class_name: str, class_block: str) -> list[DartPar
         if base_type in _WIDGET_INTERNAL_TYPES:
             continue
 
+        # Resolve docstring: ctor param doc takes priority, then field doc
+        doc = ctor_param_docs.get(field_name, "") or field_docs.get(field_name, "")
+
         result.append(
             DartParam(
                 name=field_name,
@@ -812,6 +913,7 @@ def _parse_constructor_params(class_name: str, class_block: str) -> list[DartPar
                 required=required and default is None,
                 named=named,
                 default=default,
+                docstring=doc,
             )
         )
 

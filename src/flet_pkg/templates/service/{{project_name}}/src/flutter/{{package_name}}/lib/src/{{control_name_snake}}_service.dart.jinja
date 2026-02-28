@@ -26,15 +26,29 @@ class {{ control_name }}Service extends FletService {
       arguments = Map<String, dynamic>.from(args);
     }
 
-    return switch (methodName) {
-      "example_method" => _exampleMethod(arguments),
-      _ => throw Exception("Unknown method: $methodName"),
-    };
+    try {
+      return switch (methodName) {
+        "example_method" => _exampleMethod(arguments),
+        _ => throw Exception("Unknown method: $methodName"),
+      };
+    } catch (error, stackTrace) {
+      _handleError(methodName, error, stackTrace);
+      return null;
+    }
   }
 
   Future<void> _exampleMethod(Map<String, dynamic> args) async {
     final value = args["value"] as String?;
     debugPrint("{{ control_name }}Service: example_method called with value=$value");
     // TODO: Call the actual Flutter package SDK here
+  }
+
+  void _handleError(String method, Object error, StackTrace stackTrace) {
+    debugPrint("{{ control_name }}Service ERROR in $method: $error");
+    control.triggerEvent("error", {
+      "method": method,
+      "message": error.toString(),
+      "stack_trace": stackTrace.toString(),
+    });
   }
 }

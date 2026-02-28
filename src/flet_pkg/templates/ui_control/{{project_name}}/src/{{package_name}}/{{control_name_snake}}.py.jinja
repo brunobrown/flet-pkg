@@ -1,6 +1,8 @@
 from typing import Optional
 import flet as ft
 
+from {{ package_name }}.types import {{ control_name }}ErrorEvent
+
 
 @ft.control("{{ control_name }}")
 class {{ control_name }}(ft.LayoutControl):
@@ -9,3 +11,6 @@ class {{ control_name }}(ft.LayoutControl):
     # TODO: Add your visual properties here
     # color: Optional[ft.ColorValue] = None
     # size: float = 100.0
+
+    on_error: Optional[ft.EventHandler[{{ control_name }}ErrorEvent]] = None
+    """Called when an error occurs in the SDK."""

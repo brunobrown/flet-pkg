@@ -47,7 +47,7 @@ class TestDartMethod:
 
 class TestDartEnum:
     def test_basic(self):
-        e = DartEnum(name="LogLevel", values=["debug", "info", "error"])
+        e = DartEnum(name="LogLevel", values=[("debug", ""), ("info", ""), ("error", "")])
         assert len(e.values) == 3
         assert e.name == "LogLevel"
 
@@ -73,7 +73,7 @@ class TestDartPackageAPI:
     def test_with_data(self):
         api = DartPackageAPI(
             classes=[DartClass(name="Foo")],
-            enums=[DartEnum(name="Bar", values=["a", "b"])],
+            enums=[DartEnum(name="Bar", values=[("a", ""), ("b", "")])],
         )
         assert len(api.classes) == 1
         assert len(api.enums) == 1

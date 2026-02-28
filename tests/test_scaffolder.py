@@ -13,6 +13,7 @@ def service_context():
         "flutter_package": "test_flutter",
         "description": "A test extension",
         "author": "Test Author",
+        "include_console": True,
     }
 
 
@@ -79,6 +80,7 @@ class TestScaffolder:
             "flutter_package": "my_widget_flutter",
             "description": "A widget extension",
             "author": "Test",
+            "include_console": True,
         }
         scaffolder = Scaffolder("ui_control", context, tmp_path)
         project_dir = scaffolder.generate()
@@ -119,3 +121,80 @@ class TestScaffolder:
         # template.yaml should not appear in output
         for p in project_dir.rglob("template.yaml"):
             pytest.fail(f"template.yaml found in output at {p}")
+
+    def test_service_stub_has_on_error(self, tmp_path, service_context):
+        scaffolder = Scaffolder("service", service_context, tmp_path)
+        project_dir = scaffolder.generate()
+
+        # Control file has on_error handler
+        control_file = project_dir / "src" / "flet_test" / "test_control.py"
+        content = control_file.read_text()
+        assert "on_error" in content
+        assert "TestControlErrorEvent" in content
+
+        # types.py has ErrorEvent dataclass
+        types_file = project_dir / "src" / "flet_test" / "types.py"
+        assert types_file.exists()
+        types_content = types_file.read_text()
+        assert "class TestControlErrorEvent" in types_content
+        assert "ft.Event" in types_content
+
+        # __init__.py exports ErrorEvent
+        init_file = project_dir / "src" / "flet_test" / "__init__.py"
+        init_content = init_file.read_text()
+        assert "TestControlErrorEvent" in init_content
+
+        # Dart service has _handleError
+        svc_file = (
+            project_dir
+            / "src"
+            / "flutter"
+            / "flet_test"
+            / "lib"
+            / "src"
+            / "test_control_service.dart"
+        )
+        dart_content = svc_file.read_text()
+        assert "_handleError" in dart_content
+        assert "triggerEvent" in dart_content
+
+        # Example has on_error
+        example_file = project_dir / "examples" / "flet_test_example" / "src" / "main.py"
+        example_content = example_file.read_text()
+        assert "on_error" in example_content
+
+    def test_ui_control_stub_has_on_error(self, tmp_path):
+        context = {
+            "project_name": "flet-mywidget",
+            "package_name": "flet_mywidget",
+            "control_name": "MyWidget",
+            "control_name_snake": "my_widget",
+            "flutter_package": "my_widget_flutter",
+            "description": "A widget extension",
+            "author": "Test",
+            "include_console": True,
+        }
+        scaffolder = Scaffolder("ui_control", context, tmp_path)
+        project_dir = scaffolder.generate()
+
+        # Control file has on_error handler
+        control_file = project_dir / "src" / "flet_mywidget" / "my_widget.py"
+        content = control_file.read_text()
+        assert "on_error" in content
+        assert "MyWidgetErrorEvent" in content
+
+        # types.py has ErrorEvent dataclass
+        types_file = project_dir / "src" / "flet_mywidget" / "types.py"
+        assert types_file.exists()
+        types_content = types_file.read_text()
+        assert "class MyWidgetErrorEvent" in types_content
+
+        # __init__.py exports ErrorEvent
+        init_file = project_dir / "src" / "flet_mywidget" / "__init__.py"
+        init_content = init_file.read_text()
+        assert "MyWidgetErrorEvent" in init_content
+
+        # Example has on_error
+        example_file = project_dir / "examples" / "flet_mywidget_example" / "src" / "main.py"
+        example_content = example_file.read_text()
+        assert "on_error" in example_content

@@ -49,20 +49,29 @@ class PythonTypesGenerator(CodeGenerator):
         for enum in plan.enums:
             lines.append(f"class {enum.python_name}(Enum):")
             if enum.docstring:
-                lines.append(f'    """{enum.docstring}"""')
+                lines.extend(self._format_docstring(enum.docstring, "    "))
             else:
                 lines.append(f'    """{enum.python_name} enum."""')
             lines.append("")
-            for val_name, val_value in enum.values:
+            for val_name, val_value, val_doc in enum.values:
                 # Convert camelCase to UPPER_SNAKE_CASE (e.g. sdkUnavailable → SDK_UNAVAILABLE)
                 py_name = camel_to_snake(val_name).upper()
                 lines.append(f'    {py_name} = "{val_value}"')
-                lines.append(f'    """{val_name}."""')
+                if val_doc:
+                    lines.append(f'    """{val_doc}"""')
+                else:
+                    lines.append(f'    """{val_name}."""')
                 lines.append("")
             lines.append("")
 
-        # Event dataclasses
+        # Event dataclasses (deduplicate by class name — multiple events
+        # can share the same Stream<T> type, e.g. onMessage and onMessageOpenedApp
+        # both use Stream<RemoteMessage>)
+        seen_event_classes: set[str] = set()
         for event in plan.events:
+            if event.event_class_name in seen_event_classes:
+                continue
+            seen_event_classes.add(event.event_class_name)
             lines.append("")
             lines.append("@dataclass")
             lines.append(f'class {event.event_class_name}(ft.Event["{plan.control_name}"]):')

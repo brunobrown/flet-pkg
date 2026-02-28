@@ -25,6 +25,7 @@ class DartParam:
     required: bool = False
     named: bool = False
     default: str | None = None
+    docstring: str = ""
 
 
 @dataclass
@@ -46,7 +47,8 @@ class DartEnum:
     """A Dart enum declaration."""
 
     name: str
-    values: list[str] = field(default_factory=list)
+    values: list[tuple[str, str]] = field(default_factory=list)
+    """(value_name, docstring) pairs."""
     docstring: str = ""
 
 
@@ -95,6 +97,7 @@ class ParamPlan:
     is_optional: bool = False
     is_named: bool = False
     default: str | None = None
+    docstring: str = ""
 
     def __post_init__(self):
         if not self.dart_name:
@@ -171,7 +174,8 @@ class EnumPlan:
     """Plan for generating a Python Enum class."""
 
     python_name: str
-    values: list[tuple[str, str]] = field(default_factory=list)
+    values: list[tuple[str, str, str]] = field(default_factory=list)
+    """(PYTHON_NAME, "value", "docstring") triples."""
     docstring: str = ""
 
 
@@ -242,3 +246,5 @@ class GenerationPlan:
     """Name of the error event class (e.g. ``OSErrorEvent``)."""
     sub_controls: list[SubControlPlan] = field(default_factory=list)
     """Sub-control plans for compound widgets (e.g. ActionPane for Slidable)."""
+    include_console: bool = True
+    """Whether to include the debug console module."""

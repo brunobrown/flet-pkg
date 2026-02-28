@@ -45,6 +45,11 @@ def create(
     local_package: Optional[Path] = typer.Option(
         None, "--local-package", "-l", help="Path to a local Flutter package (skip download)."
     ),
+    console_module: Optional[bool] = typer.Option(
+        None,
+        "--console/--no-console",
+        help="Include debug console module (default: True).",
+    ),
 ) -> None:
     """Create a new Flet extension package."""
     header_panel("Flet Extension Generator", "Create a new Flet extension")
@@ -113,6 +118,10 @@ def create(
     # Author
     author = ask("Author", default="")
 
+    # Debug console module
+    if console_module is None:
+        console_module = ask_confirm("Include debug console module?", default=True)
+
     context = {
         "project_name": project_name,
         "package_name": package_name,
@@ -121,6 +130,7 @@ def create(
         "flutter_package": flutter_package,
         "description": description,
         "author": author,
+        "include_console": console_module,
     }
 
     output_dir = output or Path.cwd()
@@ -134,6 +144,12 @@ def create(
     except Exception as e:
         error_panel("Error", f"Failed to generate project: {e}")
         raise typer.Exit(1)
+
+    # Remove console.py if --no-console
+    if not console_module:
+        console_file = project_dir / "src" / package_name / "console.py"
+        if console_file.exists():
+            console_file.unlink()
 
     # Run analysis pipeline if --analyze
     if analyze:
@@ -153,6 +169,7 @@ def create(
                 description=description,
                 local_package=local_package,
                 control_name_snake=context["control_name_snake"],
+                include_console=console_module,
             )
 
             if result.warnings:

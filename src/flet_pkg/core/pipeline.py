@@ -58,6 +58,7 @@ class GenerationPipeline:
         description: str = "",
         local_package: Path | None = None,
         control_name_snake: str = "",
+        include_console: bool = True,
     ) -> PipelineResult:
         """Run the full generation pipeline.
 
@@ -70,6 +71,7 @@ class GenerationPipeline:
             description: Package description.
             local_package: If set, use this local path instead of downloading.
             control_name_snake: Snake_case name for files (matches template context).
+            include_console: Whether to include debug console module (default: True).
 
         Returns:
             PipelineResult with generated file list and warnings.
@@ -131,6 +133,7 @@ class GenerationPipeline:
             )
             # Set control_name_snake from the template context
             plan.control_name_snake = control_name_snake
+            plan.include_console = include_console
             result.plan = plan
 
             # Resolve re-exported types from platform_interface packages
