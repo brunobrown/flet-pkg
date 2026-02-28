@@ -22,8 +22,6 @@ def main(page: ft.Page):
 
     page.add(
         {{ control_name }}(
-            width=200,
-            height=200,
 {% if include_console %}
             on_error=lambda e: logger.error(f"Error: {e.method}: {e.message}"),
 {% else %}
