@@ -13,7 +13,7 @@
 
 ---
 
-> **Important: this tool does not do magic.**
+> **Important: this tool does not do magic.** 🧙🏽‍♂️🧙🏻‍♀️😂
 >
 > Every Flutter package on [pub.dev](https://pub.dev) has its own API surface, configuration requirements, and platform-specific behaviors. Some packages expose simple method calls; others require complex initialization flows, native platform setup (Android manifests, iOS plists, Gradle/CocoaPods configuration), or callback-based architectures that don't map cleanly to Python.
 >
