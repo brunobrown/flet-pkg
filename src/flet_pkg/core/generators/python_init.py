@@ -36,6 +36,12 @@ class PythonInitGenerator(CodeGenerator):
             lines.append(f"from {plan.package_name}.{control_snake} import {sub.control_name}")
             all_exports.append(sub.control_name)
 
+        # Sibling widget imports (from separate modules)
+        for sibling in plan.sibling_widgets:
+            sib_snake = sibling.control_name_snake or camel_to_snake(sibling.control_name)
+            lines.append(f"from {plan.package_name}.{sib_snake} import {sibling.control_name}")
+            all_exports.append(sibling.control_name)
+
         # Sub-module imports
         for sub in plan.sub_modules:
             lines.append(f"from {plan.package_name}.{sub.module_name} import {sub.class_name}")
@@ -49,6 +55,14 @@ class PythonInitGenerator(CodeGenerator):
             type_names.append(event.event_class_name)
         for stub in plan.stub_data_classes:
             type_names.append(stub.python_name)
+        # Sub-control event types
+        for sub in self._flatten_sub_controls(plan.sub_controls):
+            for event in sub.events:
+                type_names.append(event.event_class_name)
+        # Sibling event types
+        for sibling in plan.sibling_widgets:
+            for event in sibling.events:
+                type_names.append(event.event_class_name)
         # Error event is always generated
         type_names.append(plan.error_event_class or f"{plan.control_name}ErrorEvent")
         type_names = sorted(set(type_names))
@@ -81,6 +95,12 @@ class PythonInitGenerator(CodeGenerator):
             for sub in flat_subs:
                 lines.append(f'    "{sub.control_name}",')
 
+        # Group: Sibling widgets
+        if plan.sibling_widgets:
+            lines.append("    # Sibling widgets")
+            for sibling in plan.sibling_widgets:
+                lines.append(f'    "{sibling.control_name}",')
+
         # Group: Sub-modules
         if plan.sub_modules:
             lines.append("    # Sub-modules")
@@ -95,9 +115,16 @@ class PythonInitGenerator(CodeGenerator):
 
         # Group: Types and events
         sub_control_names = {s.control_name for s in flat_subs}
+        sibling_names = {s.control_name for s in plan.sibling_widgets}
         sub_module_names = {s.class_name for s in plan.sub_modules}
         console_names = {"DebugConsole", "setup_logging"} if plan.include_console else set()
-        already_listed = {plan.control_name} | sub_control_names | sub_module_names | console_names
+        already_listed = (
+            {plan.control_name}
+            | sub_control_names
+            | sibling_names
+            | sub_module_names
+            | console_names
+        )
         lines.append("    # Types and events")
         for name in sorted(set(all_exports)):
             if name not in already_listed:

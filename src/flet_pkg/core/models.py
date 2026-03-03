@@ -223,6 +223,36 @@ class SubControlPlan:
 
 
 @dataclass
+class WidgetVariant:
+    """A variant in a widget family (e.g. SpinKitCircle, SpinKitHourGlass)."""
+
+    dart_class_name: str
+    """Original Dart class name (e.g. ``SpinKitCircle``)."""
+    enum_value: str
+    """Snake_case enum value (e.g. ``circle``)."""
+
+
+@dataclass
+class SiblingWidgetPlan:
+    """A sibling widget — a separate control in the same package.
+
+    Used when a Flutter package exposes multiple distinct widgets
+    with low parameter overlap (e.g. CircularPercentIndicator vs
+    LinearPercentIndicator).
+    """
+
+    control_name: str
+    """PascalCase name for the generated class."""
+    dart_class_name: str
+    """Original Dart class name."""
+    properties: list[PropertyPlan] = field(default_factory=list)
+    events: list[EventPlan] = field(default_factory=list)
+    sub_controls: list[SubControlPlan] = field(default_factory=list)
+    control_name_snake: str = ""
+    """Snake_case name for filenames."""
+
+
+@dataclass
 class GenerationPlan:
     """Complete plan for code generation. Fed to generators."""
 
@@ -248,3 +278,9 @@ class GenerationPlan:
     """Sub-control plans for compound widgets (e.g. ActionPane for Slidable)."""
     include_console: bool = True
     """Whether to include the debug console module."""
+    widget_family_variants: list[WidgetVariant] = field(default_factory=list)
+    """Variants for widget family pattern (e.g. SpinKit → 30 variants)."""
+    widget_family_enum: EnumPlan | None = None
+    """Enum plan for the widget family type selector."""
+    sibling_widgets: list[SiblingWidgetPlan] = field(default_factory=list)
+    """Sibling widget plans for multi-widget packages."""

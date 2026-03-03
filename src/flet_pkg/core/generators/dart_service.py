@@ -7,7 +7,13 @@ method dispatch from Python, event listener setup, and real SDK calls.
 from __future__ import annotations
 
 from flet_pkg.core.generators.base import CodeGenerator
-from flet_pkg.core.models import GenerationPlan, MethodPlan, SubControlPlan, SubModulePlan
+from flet_pkg.core.models import (
+    GenerationPlan,
+    MethodPlan,
+    SiblingWidgetPlan,
+    SubControlPlan,
+    SubModulePlan,
+)
 from flet_pkg.core.parser import camel_to_snake
 
 
@@ -21,7 +27,19 @@ class DartServiceGenerator(CodeGenerator):
 
         # UI controls use StatefulWidget + LayoutControl pattern
         if service_type == "Widget":
-            return {filename: self._generate_ui_control(plan, control_snake)}
+            files: dict[str, str] = {filename: self._generate_ui_control(plan, control_snake)}
+
+            # Generate sibling widget Dart files
+            for sibling in plan.sibling_widgets:
+                sib_snake = sibling.control_name_snake or camel_to_snake(sibling.control_name)
+                sib_file = f"{sib_snake}_widget.dart"
+                files[sib_file] = self._generate_sibling_widget(sibling, plan)
+
+            # Generate extension.dart when siblings exist
+            if plan.sibling_widgets:
+                files["extension.dart"] = self._generate_extension_dart(plan)
+
+            return files
 
         # Service path — unchanged
         class_name = f"{plan.control_name}{service_type}"
@@ -123,7 +141,12 @@ class DartServiceGenerator(CodeGenerator):
 
         # Imports
         lines.append("import 'package:flet/flet.dart';")
-        lines.append("import 'package:flutter/widgets.dart';")
+        # Use material.dart if TextStyle getters need Theme.of(context)
+        needs_material = any("Theme.of(context)" in (p.dart_getter or "") for p in plan.properties)
+        if needs_material:
+            lines.append("import 'package:flutter/material.dart';")
+        else:
+            lines.append("import 'package:flutter/widgets.dart';")
         if plan.dart_import:
             lines.append(f"import '{plan.dart_import}';")
         lines.append("")
@@ -155,10 +178,12 @@ class DartServiceGenerator(CodeGenerator):
                 dart_var = _to_camel_case(prop.python_name)
                 if prop.dart_getter:
                     # Use the pre-computed typed getter from the analyzer
-                    getter_expr = prop.dart_getter.replace("control.", "widget.control.")
-                    # buildWidget/buildWidgets don't need widget. prefix
-                    if getter_expr.startswith("buildWidget"):
+                    if prop.dart_getter.startswith("widget.") or prop.dart_getter.startswith(
+                        "buildWidget"
+                    ):
                         getter_expr = prop.dart_getter
+                    else:
+                        getter_expr = prop.dart_getter.replace("control.", "widget.control.")
                     lines.append(f"      final {dart_var} = {getter_expr};")
                 else:
                     # Fallback to getString
@@ -168,16 +193,46 @@ class DartServiceGenerator(CodeGenerator):
             lines.append("")
 
         # Build SDK widget constructor args
-        lines.append("      return LayoutControl(")
-        lines.append("        control: widget.control,")
-        lines.append(f"        child: {sdk_class}(")
-        for prop in plan.properties:
-            dart_var = _to_camel_case(prop.python_name)
-            # Use the original Dart param name for the constructor
-            dart_param = prop.dart_name or prop.python_name
-            lines.append(f"          {dart_param}: {dart_var},")
-        lines.append("        ),")
-        lines.append("      );")
+        if plan.widget_family_variants:
+            # Family variant: switch on type to select the right SDK widget
+            lines.append("      final Widget sdkChild;")
+            default_val = plan.widget_family_variants[0].enum_value
+            lines.append(f'      final type = widget.control.getString("type") ?? "{default_val}";')
+            lines.append("      switch (type) {")
+            # Build shared args string (all properties except "type")
+            shared_args: list[str] = []
+            for prop in plan.properties:
+                if prop.python_name == "type":
+                    continue
+                dart_var = _to_camel_case(prop.python_name)
+                dart_param = prop.dart_name or prop.python_name
+                shared_args.append(f"{dart_param}: {dart_var}")
+            args_str = ", ".join(shared_args)
+            for variant in plan.widget_family_variants:
+                lines.append(f'        case "{variant.enum_value}":')
+                lines.append(f"          sdkChild = {variant.dart_class_name}({args_str});")
+                lines.append("          break;")
+            # Default case
+            default_cls = plan.widget_family_variants[0].dart_class_name
+            lines.append("        default:")
+            lines.append(f"          sdkChild = {default_cls}({args_str});")
+            lines.append("      }")
+            lines.append("")
+            lines.append("      return LayoutControl(")
+            lines.append("        control: widget.control,")
+            lines.append("        child: sdkChild,")
+            lines.append("      );")
+        else:
+            lines.append("      return LayoutControl(")
+            lines.append("        control: widget.control,")
+            lines.append(f"        child: {sdk_class}(")
+            for prop in plan.properties:
+                dart_var = _to_camel_case(prop.python_name)
+                # Use the original Dart param name for the constructor
+                dart_param = prop.dart_name or prop.python_name
+                lines.append(f"          {dart_param}: {dart_var},")
+            lines.append("        ),")
+            lines.append("      );")
 
         # Error handling
         lines.append("    } catch (error, stackTrace) {")
@@ -207,6 +262,128 @@ class DartServiceGenerator(CodeGenerator):
         return "\n".join(lines)
 
     # ------------------------------------------------------------------
+    # Sibling widget generation
+    # ------------------------------------------------------------------
+
+    def _generate_sibling_widget(self, sibling: SiblingWidgetPlan, plan: GenerationPlan) -> str:
+        """Generate a standalone StatefulWidget Dart file for a sibling widget."""
+        widget_class = f"{sibling.control_name}Widget"
+        state_class = f"_{sibling.control_name}WidgetState"
+        sdk_class = sibling.dart_class_name
+        needs_material = any(
+            "Theme.of(context)" in (p.dart_getter or "") for p in sibling.properties
+        )
+        flutter_import = (
+            "import 'package:flutter/material.dart';"
+            if needs_material
+            else "import 'package:flutter/widgets.dart';"
+        )
+        lines: list[str] = [
+            "import 'package:flet/flet.dart';",
+            flutter_import,
+        ]
+
+        # Imports
+        if plan.dart_import:
+            lines.append(f"import '{plan.dart_import}';")
+        lines.append("")
+
+        # StatefulWidget
+        lines.append(f"/// {sibling.control_name} widget implementation for Flet.")
+        lines.append(f"class {widget_class} extends StatefulWidget {{")
+        lines.append("  final Control control;")
+        lines.append(f"  const {widget_class}({{super.key, required this.control}});")
+        lines.append("")
+        lines.append("  @override")
+        lines.append(f"  State<{widget_class}> createState() => {state_class}();")
+        lines.append("}")
+        lines.append("")
+
+        # State class
+        lines.append(f"class {state_class} extends State<{widget_class}> {{")
+        lines.append("  @override")
+        lines.append("  Widget build(BuildContext context) {")
+        lines.append("    try {")
+
+        # Read properties
+        if sibling.properties:
+            for prop in sibling.properties:
+                dart_var = _to_camel_case(prop.python_name)
+                if prop.dart_getter:
+                    getter_expr = prop.dart_getter.replace("control.", "widget.control.")
+                    if getter_expr.startswith("buildWidget"):
+                        getter_expr = prop.dart_getter
+                    lines.append(f"      final {dart_var} = {getter_expr};")
+                else:
+                    lines.append(
+                        f'      final {dart_var} = widget.control.getString("{prop.python_name}");'
+                    )
+            lines.append("")
+
+        # SDK widget constructor
+        lines.append("      return LayoutControl(")
+        lines.append("        control: widget.control,")
+        lines.append(f"        child: {sdk_class}(")
+        for prop in sibling.properties:
+            dart_var = _to_camel_case(prop.python_name)
+            dart_param = prop.dart_name or prop.python_name
+            lines.append(f"          {dart_param}: {dart_var},")
+        lines.append("        ),")
+        lines.append("      );")
+
+        # Error handling
+        lines.append("    } catch (error, stackTrace) {")
+        lines.append("      _handleError(error, stackTrace);")
+        lines.append("      return const SizedBox.shrink();")
+        lines.append("    }")
+        lines.append("  }")
+        lines.append("")
+
+        # _handleError
+        lines.append("  void _handleError(Object error, StackTrace stackTrace) {")
+        lines.append(f'    debugPrint("{widget_class} ERROR: $error");')
+        lines.append('    widget.control.triggerEvent("error", {')
+        lines.append('      "message": error.toString(),')
+        lines.append('      "stack_trace": stackTrace.toString(),')
+        lines.append("    });")
+        lines.append("  }")
+
+        lines.append("}")
+        lines.append("")
+
+        return "\n".join(lines)
+
+    def _generate_extension_dart(self, plan: GenerationPlan) -> str:
+        """Generate extension.dart that registers main + sibling widgets."""
+        control_snake = plan.control_name_snake or camel_to_snake(plan.control_name)
+        lines: list[str] = []
+
+        # Imports
+        lines.append("import 'package:flet/flet.dart';")
+        lines.append("import 'package:flutter/widgets.dart';")
+        lines.append(f"import 'src/{control_snake}_widget.dart';")
+        for sibling in plan.sibling_widgets:
+            sib_snake = sibling.control_name_snake or camel_to_snake(sibling.control_name)
+            lines.append(f"import 'src/{sib_snake}_widget.dart';")
+        lines.append("")
+
+        # createControl function
+        lines.append("Widget? createControl(Control control) {")
+        lines.append("  switch (control.type) {")
+        lines.append(f'    case "{plan.control_name}":')
+        lines.append(f"      return {plan.control_name}Widget(control: control);")
+        for sibling in plan.sibling_widgets:
+            lines.append(f'    case "{sibling.control_name}":')
+            lines.append(f"      return {sibling.control_name}Widget(control: control);")
+        lines.append("    default:")
+        lines.append("      return null;")
+        lines.append("  }")
+        lines.append("}")
+        lines.append("")
+
+        return "\n".join(lines)
+
+    # ------------------------------------------------------------------
     # Sub-control widget rendering
     # ------------------------------------------------------------------
 
@@ -229,30 +406,38 @@ class DartServiceGenerator(CodeGenerator):
         lines.append(f"class {state_class} extends State<{widget_class}> {{")
         lines.append("  @override")
         lines.append("  Widget build(BuildContext context) {")
+        lines.append("    try {")
 
         # Read properties using typed getters
         for prop in sub.properties:
             dart_var = _to_camel_case(prop.python_name)
             if prop.dart_getter:
-                getter_expr = prop.dart_getter.replace("control.", "widget.control.")
-                if getter_expr.startswith("buildWidget"):
+                if prop.dart_getter.startswith("widget.") or prop.dart_getter.startswith(
+                    "buildWidget"
+                ):
                     getter_expr = prop.dart_getter
-                lines.append(f"    final {dart_var} = {getter_expr};")
+                else:
+                    getter_expr = prop.dart_getter.replace("control.", "widget.control.")
+                lines.append(f"      final {dart_var} = {getter_expr};")
             else:
                 lines.append(
-                    f'    final {dart_var} = widget.control.getString("{prop.python_name}");'
+                    f'      final {dart_var} = widget.control.getString("{prop.python_name}");'
                 )
 
         if sub.properties:
             lines.append("")
 
         # Build constructor call
-        lines.append(f"    return {sub.dart_class_name}(")
+        lines.append(f"      return {sub.dart_class_name}(")
         for prop in sub.properties:
             dart_var = _to_camel_case(prop.python_name)
             dart_param = prop.dart_name or prop.python_name
-            lines.append(f"      {dart_param}: {dart_var},")
-        lines.append("    );")
+            lines.append(f"        {dart_param}: {dart_var},")
+        lines.append("      );")
+        lines.append("    } catch (error, stackTrace) {")
+        lines.append(f'      debugPrint("{sub.dart_class_name} ERROR: $error");')
+        lines.append("      return const SizedBox.shrink();")
+        lines.append("    }")
         lines.append("  }")
         lines.append("}")
         lines.append("")

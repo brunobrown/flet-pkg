@@ -14,8 +14,10 @@ from flet_pkg.core.models import (
     MethodPlan,
     ParamPlan,
     PropertyPlan,
+    SiblingWidgetPlan,
     SubControlPlan,
     SubModulePlan,
+    WidgetVariant,
 )
 
 
@@ -531,3 +533,209 @@ class TestSubControlGeneration:
         content = files["__init__.py"]
         assert "from flet_slidable.slidable import ActionPane" in content
         assert '"ActionPane"' in content
+
+
+# ---------------------------------------------------------------------------
+# Widget Family generation tests
+# ---------------------------------------------------------------------------
+
+
+class TestWidgetFamilyGeneration:
+    """Tests for family variant code generation."""
+
+    @pytest.fixture
+    def family_plan(self):
+        return GenerationPlan(
+            control_name="SpinKit",
+            package_name="flet_spinkit",
+            base_class="ft.LayoutControl",
+            flutter_package="flutter_spinkit",
+            dart_import="package:flutter_spinkit/flutter_spinkit.dart",
+            dart_main_class="SpinKitCircle",
+            properties=[
+                PropertyPlan(
+                    python_name="type",
+                    python_type="SpinKitType | None",
+                    default_value="None",
+                    dart_name="type",
+                    dart_getter='widget.control.getString("type")',
+                ),
+                PropertyPlan(
+                    python_name="color",
+                    python_type="ft.Color | None",
+                    default_value="None",
+                    dart_name="color",
+                    dart_getter='widget.control.getColor("color")',
+                ),
+                PropertyPlan(
+                    python_name="size",
+                    python_type="ft.Number | None",
+                    default_value="None",
+                    dart_name="size",
+                    dart_getter='widget.control.getDouble("size")',
+                ),
+            ],
+            enums=[
+                EnumPlan(
+                    python_name="SpinKitType",
+                    values=[
+                        ("CIRCLE", "circle", "SpinKitCircle variant."),
+                        ("HOUR_GLASS", "hour_glass", "SpinKitHourGlass variant."),
+                        ("WAVE", "wave", "SpinKitWave variant."),
+                    ],
+                ),
+            ],
+            widget_family_variants=[
+                WidgetVariant(dart_class_name="SpinKitCircle", enum_value="circle"),
+                WidgetVariant(dart_class_name="SpinKitHourGlass", enum_value="hour_glass"),
+                WidgetVariant(dart_class_name="SpinKitWave", enum_value="wave"),
+            ],
+        )
+
+    def test_dart_family_switch_all_variants(self, family_plan):
+        """Dart file should contain a switch with all variant cases."""
+        gen = DartServiceGenerator()
+        files = gen.generate(family_plan)
+        content = files["spin_kit_widget.dart"]
+        assert 'case "circle":' in content
+        assert 'case "hour_glass":' in content
+        assert 'case "wave":' in content
+        assert "SpinKitCircle(" in content
+        assert "SpinKitHourGlass(" in content
+        assert "SpinKitWave(" in content
+
+    def test_dart_family_default_case(self, family_plan):
+        """Dart switch should have a default case."""
+        gen = DartServiceGenerator()
+        files = gen.generate(family_plan)
+        content = files["spin_kit_widget.dart"]
+        assert "default:" in content
+
+    def test_dart_family_shared_args(self, family_plan):
+        """Each variant should receive the shared args."""
+        gen = DartServiceGenerator()
+        files = gen.generate(family_plan)
+        content = files["spin_kit_widget.dart"]
+        assert "color: color" in content
+        assert "size: size" in content
+
+    def test_python_family_type_property(self, family_plan):
+        """Python control should have a 'type' property."""
+        gen = PythonControlGenerator()
+        files = gen.generate(family_plan)
+        content = files["spin_kit.py"]
+        assert "type: SpinKitType | None = None" in content
+
+
+# ---------------------------------------------------------------------------
+# Sibling widget generation tests
+# ---------------------------------------------------------------------------
+
+
+class TestSiblingWidgetGeneration:
+    """Tests for sibling widget code generation."""
+
+    @pytest.fixture
+    def sibling_plan(self):
+        return GenerationPlan(
+            control_name="CircularPercentIndicator",
+            package_name="flet_percent_indicator",
+            base_class="ft.LayoutControl",
+            flutter_package="percent_indicator",
+            dart_import="package:percent_indicator/percent_indicator.dart",
+            dart_main_class="CircularPercentIndicator",
+            properties=[
+                PropertyPlan(
+                    python_name="percent",
+                    python_type="ft.Number | None",
+                    default_value="None",
+                    dart_name="percent",
+                    dart_getter='widget.control.getDouble("percent")',
+                ),
+                PropertyPlan(
+                    python_name="radius",
+                    python_type="ft.Number | None",
+                    default_value="None",
+                    dart_name="radius",
+                    dart_getter='widget.control.getDouble("radius")',
+                ),
+            ],
+            sibling_widgets=[
+                SiblingWidgetPlan(
+                    control_name="LinearPercentIndicator",
+                    dart_class_name="LinearPercentIndicator",
+                    control_name_snake="linear_percent_indicator",
+                    properties=[
+                        PropertyPlan(
+                            python_name="percent",
+                            python_type="ft.Number | None",
+                            default_value="None",
+                            dart_name="percent",
+                            dart_getter='widget.control.getDouble("percent")',
+                        ),
+                        PropertyPlan(
+                            python_name="width",
+                            python_type="ft.Number | None",
+                            default_value="None",
+                            dart_name="width",
+                            dart_getter='widget.control.getDouble("width")',
+                        ),
+                    ],
+                    events=[
+                        EventPlan(
+                            python_attr_name="on_animation_end",
+                            event_class_name="LinearPercentIndicatorAnimationEndEvent",
+                            dart_event_name="animation_end",
+                        ),
+                    ],
+                ),
+            ],
+        )
+
+    def test_sibling_generates_separate_python_files(self, sibling_plan):
+        """Each sibling should get its own Python file."""
+        gen = PythonControlGenerator()
+        files = gen.generate(sibling_plan)
+        assert "linear_percent_indicator.py" in files
+        content = files["linear_percent_indicator.py"]
+        assert "class LinearPercentIndicator(ft.LayoutControl):" in content
+        assert "percent:" in content
+        assert "width:" in content
+
+    def test_sibling_generates_separate_dart_files(self, sibling_plan):
+        """Each sibling should get its own Dart widget file."""
+        gen = DartServiceGenerator()
+        files = gen.generate(sibling_plan)
+        assert "linear_percent_indicator_widget.dart" in files
+        content = files["linear_percent_indicator_widget.dart"]
+        assert "class LinearPercentIndicatorWidget extends StatefulWidget" in content
+        assert "LinearPercentIndicator(" in content
+
+    def test_sibling_extension_dart_registers_all(self, sibling_plan):
+        """extension.dart should register both main and sibling widgets."""
+        gen = DartServiceGenerator()
+        files = gen.generate(sibling_plan)
+        assert "extension.dart" in files
+        content = files["extension.dart"]
+        assert '"CircularPercentIndicator"' in content
+        assert '"LinearPercentIndicator"' in content
+        assert "CircularPercentIndicatorWidget(control: control)" in content
+        assert "LinearPercentIndicatorWidget(control: control)" in content
+
+    def test_sibling_init_exports_all(self, sibling_plan):
+        """__init__.py should export all sibling controls."""
+        gen = PythonInitGenerator()
+        files = gen.generate(sibling_plan)
+        content = files["__init__.py"]
+        assert (
+            "from flet_percent_indicator.linear_percent_indicator import LinearPercentIndicator"
+            in content
+        )
+        assert '"LinearPercentIndicator"' in content
+
+    def test_sibling_types_include_events(self, sibling_plan):
+        """types.py should include sibling event classes."""
+        gen = PythonTypesGenerator()
+        files = gen.generate(sibling_plan)
+        content = files["types.py"]
+        assert "class LinearPercentIndicatorAnimationEndEvent" in content

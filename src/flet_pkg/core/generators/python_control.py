@@ -8,7 +8,7 @@ properties, event handlers, and async methods.
 from __future__ import annotations
 
 from flet_pkg.core.generators.base import CodeGenerator
-from flet_pkg.core.models import GenerationPlan, MethodPlan, SubControlPlan
+from flet_pkg.core.models import GenerationPlan, MethodPlan, SiblingWidgetPlan, SubControlPlan
 from flet_pkg.core.parser import camel_to_snake
 
 
@@ -62,6 +62,10 @@ class PythonControlGenerator(CodeGenerator):
         type_imports: list[str] = []
         for event in plan.events:
             type_imports.append(event.event_class_name)
+        # Sub-control event types
+        for sub in self._flatten_sub_controls(plan.sub_controls):
+            for event in sub.events:
+                type_imports.append(event.event_class_name)
         # Add error event
         type_imports.append(plan.error_event_class or f"{plan.control_name}ErrorEvent")
 
@@ -247,7 +251,80 @@ class PythonControlGenerator(CodeGenerator):
             lines.append("        )")
             lines.append("")
 
-        return {filename: "\n".join(lines)}
+        files = {filename: "\n".join(lines)}
+
+        # Generate sibling widget Python files
+        for sibling in plan.sibling_widgets:
+            sib_snake = sibling.control_name_snake or camel_to_snake(sibling.control_name)
+            sib_file = f"{sib_snake}.py"
+            files[sib_file] = self._generate_sibling(sibling, plan)
+
+        return files
+
+    def _generate_sibling(self, sibling: SiblingWidgetPlan, plan: GenerationPlan) -> str:
+        """Generate a Python control file for a sibling widget."""
+        lines: list[str] = []
+
+        # Module docstring
+        lines.append('"""')
+        lines.append(f"{sibling.control_name} Control for {plan.package_name}.")
+        lines.append('"""')
+        lines.append("")
+
+        # Check if we need field import
+        needs_field = any(p.default_value.startswith("field(") for p in sibling.properties)
+        if needs_field:
+            lines.append("from dataclasses import field")
+        lines.append("from typing import Optional")
+        lines.append("")
+        lines.append("import flet as ft")
+        lines.append("")
+
+        # Type imports
+        type_imports: list[str] = []
+        for event in sibling.events:
+            type_imports.append(event.event_class_name)
+        error_cls = plan.error_event_class or f"{plan.control_name}ErrorEvent"
+        type_imports.append(error_cls)
+
+        # Import enums referenced by property types
+        for prop in sibling.properties:
+            for enum in plan.enums:
+                if enum.python_name in prop.python_type:
+                    type_imports.append(enum.python_name)
+
+        if type_imports:
+            lines.append(f"from {plan.package_name}.types import (")
+            for imp in sorted(set(type_imports)):
+                lines.append(f"    {imp},")
+            lines.append(")")
+        lines.append("")
+        lines.append("")
+
+        # Class definition
+        lines.append(f'@ft.control("{sibling.control_name}")')
+        lines.append(f"class {sibling.control_name}(ft.LayoutControl):")
+        lines.append(f'    """{sibling.control_name} widget for Flet."""')
+        lines.append("")
+
+        # Properties
+        for prop in sibling.properties:
+            lines.append(f"    {prop.python_name}: {prop.python_type} = {prop.default_value}")
+            lines.append("")
+
+        # Events
+        for event in sibling.events:
+            attr = event.python_attr_name
+            evt_cls = event.event_class_name
+            lines.append(f"    {attr}: Optional[ft.EventHandler[{evt_cls}]] = None")
+            lines.append("")
+
+        # Error event handler
+        lines.append(f"    on_error: Optional[ft.EventHandler[{error_cls}]] = None")
+        lines.append('    """Called when an error occurs."""')
+        lines.append("")
+
+        return "\n".join(lines)
 
     def _render_method(self, method: MethodPlan, plan: GenerationPlan) -> list[str]:
         """Render a single async method."""

@@ -889,3 +889,158 @@ class TestCompoundWidgetDetection:
         assert ap_prop is not None
         assert "ActionPane" in ap_prop.python_type
         assert "dict" not in ap_prop.python_type
+
+
+# ---------------------------------------------------------------------------
+# Multi-widget classification tests
+# ---------------------------------------------------------------------------
+
+
+class TestMultiWidgetClassification:
+    """Tests for _classify_multi_widgets and multi-widget processing."""
+
+    def _make_widget(self, name: str, params: list[str]) -> DartClass:
+        """Helper to make a DartClass with constructor params."""
+        return DartClass(
+            name=name,
+            constructor_params=[DartParam(name=p, dart_type="double") for p in params],
+        )
+
+    def test_single_widget_returns_single(self, analyzer):
+        widgets = [self._make_widget("Shimmer", ["color", "size"])]
+        strategy, filtered = analyzer._classify_multi_widgets(widgets, "Shimmer")
+        assert strategy == "single"
+        assert len(filtered) == 1
+
+    def test_family_detection_many_widgets(self, analyzer):
+        """≥5 widgets should classify as family."""
+        shared = ["color", "size", "duration"]
+        widgets = [
+            self._make_widget(f"SpinKit{name}", shared + [f"extra_{i}"])
+            for i, name in enumerate(["Circle", "HourGlass", "Wave", "Pulse", "Ring"])
+        ]
+        strategy, filtered = analyzer._classify_multi_widgets(widgets, "SpinKit")
+        assert strategy == "family"
+        assert len(filtered) == 5
+
+    def test_family_detection_high_overlap(self, analyzer):
+        """2-4 widgets with ≥60% overlap should classify as family."""
+        widgets = [
+            self._make_widget("FooA", ["color", "size", "duration", "extra"]),
+            self._make_widget("FooB", ["color", "size", "duration", "other"]),
+        ]
+        strategy, _ = analyzer._classify_multi_widgets(widgets, "Foo")
+        assert strategy == "family"
+
+    def test_sibling_detection_low_overlap(self, analyzer):
+        """2-4 widgets with <60% overlap should classify as sibling."""
+        widgets = [
+            self._make_widget("CircularIndicator", ["percent", "radius", "center"]),
+            self._make_widget(
+                "LinearIndicator", ["percent", "width", "height", "bar_radius", "fill"]
+            ),
+        ]
+        strategy, _ = analyzer._classify_multi_widgets(widgets, "Indicator")
+        assert strategy == "sibling"
+
+    def test_single_fallback_private_only(self, analyzer):
+        """All private classes → fallback to single."""
+        widgets = [
+            self._make_widget("_InternalWidget", ["x"]),
+        ]
+        strategy, _ = analyzer._classify_multi_widgets(widgets, "Internal")
+        assert strategy == "single"
+
+
+class TestWidgetFamilyProcessing:
+    """Tests for _process_widget_family."""
+
+    def _make_widget(self, name: str, params: list[str]) -> DartClass:
+        return DartClass(
+            name=name,
+            constructor_params=[DartParam(name=p, dart_type="double") for p in params],
+        )
+
+    def test_family_creates_type_enum(self, analyzer):
+        shared = ["color", "size"]
+        widgets = [
+            self._make_widget(f"SpinKit{v}", shared)
+            for v in ["Circle", "HourGlass", "Wave", "Pulse", "Ring"]
+        ]
+        api = DartPackageAPI(classes=widgets)
+        plan = analyzer.analyze(api, "SpinKit", "ui_control", "flutter_spinkit", "flet_spinkit")
+        # Should have SpinKitType enum
+        enum_names = [e.python_name for e in plan.enums]
+        assert "SpinKitType" in enum_names
+
+        # Should have widget_family_variants
+        assert len(plan.widget_family_variants) == 5
+        variant_values = [v.enum_value for v in plan.widget_family_variants]
+        assert "circle" in variant_values
+        assert "hour_glass" in variant_values
+
+    def test_family_extracts_shared_properties(self, analyzer):
+        widgets = [
+            self._make_widget("SpinKitCircle", ["color", "size", "lineWidth"]),
+            self._make_widget("SpinKitWave", ["color", "size", "itemCount"]),
+        ]
+        api = DartPackageAPI(classes=widgets)
+        plan = analyzer.analyze(api, "SpinKit", "ui_control", "flutter_spinkit", "flet_spinkit")
+        prop_names = [p.python_name for p in plan.properties]
+        assert "color" in prop_names
+        assert "size" in prop_names
+        # "type" should be the first property
+        assert prop_names[0] == "type"
+
+    def test_family_has_type_property(self, analyzer):
+        widgets = [
+            self._make_widget("SpinKitA", ["x"]),
+            self._make_widget("SpinKitB", ["x"]),
+            self._make_widget("SpinKitC", ["x"]),
+            self._make_widget("SpinKitD", ["x"]),
+            self._make_widget("SpinKitE", ["x"]),
+        ]
+        api = DartPackageAPI(classes=widgets)
+        plan = analyzer.analyze(api, "SpinKit", "ui_control", "flutter_spinkit", "flet_spinkit")
+        # First property should be "type"
+        assert plan.properties[0].python_name == "type"
+        assert "SpinKitType" in plan.properties[0].python_type
+
+
+class TestSiblingWidgetProcessing:
+    """Tests for _process_sibling_widgets."""
+
+    def _make_widget(self, name: str, params: list[str]) -> DartClass:
+        return DartClass(
+            name=name,
+            constructor_params=[DartParam(name=p, dart_type="double") for p in params],
+        )
+
+    def test_sibling_creates_separate_plans(self, analyzer):
+        widgets = [
+            self._make_widget("CircularPercentIndicator", ["percent", "radius"]),
+            self._make_widget("LinearPercentIndicator", ["percent", "width", "height", "extra"]),
+        ]
+        api = DartPackageAPI(classes=widgets)
+        plan = analyzer.analyze(
+            api, "PercentIndicator", "ui_control", "percent_indicator", "flet_percent_indicator"
+        )
+        # Should have sibling_widgets
+        assert len(plan.sibling_widgets) >= 1
+        sib_names = [s.control_name for s in plan.sibling_widgets]
+        # One of the two is the main widget, the other is a sibling
+        assert plan.dart_main_class in ("CircularPercentIndicator", "LinearPercentIndicator")
+        # The sibling should be the other one
+        for sib_name in sib_names:
+            assert sib_name != plan.dart_main_class
+
+    def test_sibling_has_own_properties(self, analyzer):
+        widgets = [
+            self._make_widget("CircularIndicator", ["percent", "radius"]),
+            self._make_widget("LinearIndicator", ["percent", "width", "height"]),
+        ]
+        api = DartPackageAPI(classes=widgets)
+        plan = analyzer.analyze(api, "Indicator", "ui_control", "test_indicator", "flet_indicator")
+        assert len(plan.sibling_widgets) >= 1
+        sibling = plan.sibling_widgets[0]
+        assert len(sibling.properties) > 0

@@ -7,7 +7,7 @@ that mirror the Dart SDK's types.
 from __future__ import annotations
 
 from flet_pkg.core.generators.base import CodeGenerator
-from flet_pkg.core.models import GenerationPlan
+from flet_pkg.core.models import GenerationPlan, SubControlPlan
 from flet_pkg.core.parser import camel_to_snake
 
 
@@ -81,7 +81,7 @@ class PythonTypesGenerator(CodeGenerator):
 
             for field_name, field_type in event.fields:
                 if field_type == "dict":
-                    lines.append(f"    {field_name}: dict = None")
+                    lines.append(f"    {field_name}: dict | None = None")
                 elif field_type == "bool":
                     lines.append(f"    {field_name}: bool = False")
                 else:
@@ -90,6 +90,56 @@ class PythonTypesGenerator(CodeGenerator):
                 field_desc = field_name.replace("_", " ").capitalize()
                 lines.append(f'    """{field_desc}."""')
                 lines.append("")
+
+        # Sibling widget event dataclasses
+        for sibling in plan.sibling_widgets:
+            for event in sibling.events:
+                if event.event_class_name in seen_event_classes:
+                    continue
+                seen_event_classes.add(event.event_class_name)
+                lines.append("")
+                lines.append("@dataclass")
+                lines.append(f'class {event.event_class_name}(ft.Event["{sibling.control_name}"]):')
+                event_desc = event.dart_event_name.replace("_", " ")
+                lines.append(f'    """Event fired when {event_desc} occurs."""')
+                lines.append("")
+
+                for field_name, field_type in event.fields:
+                    if field_type == "dict":
+                        lines.append(f"    {field_name}: dict = None")
+                    elif field_type == "bool":
+                        lines.append(f"    {field_name}: bool = False")
+                    else:
+                        opt = self._optional_type(field_type)
+                        lines.append(f"    {field_name}: {opt} = None")
+                    field_desc = field_name.replace("_", " ").capitalize()
+                    lines.append(f'    """{field_desc}."""')
+                    lines.append("")
+
+        # Sub-control event dataclasses
+        for sub in self._flatten_sub_controls(plan.sub_controls):
+            for event in sub.events:
+                if event.event_class_name in seen_event_classes:
+                    continue
+                seen_event_classes.add(event.event_class_name)
+                lines.append("")
+                lines.append("@dataclass")
+                lines.append(f'class {event.event_class_name}(ft.Event["{sub.control_name}"]):')
+                event_desc = event.dart_event_name.replace("_", " ")
+                lines.append(f'    """Event fired when {event_desc} occurs."""')
+                lines.append("")
+
+                for field_name, field_type in event.fields:
+                    if field_type == "dict":
+                        lines.append(f"    {field_name}: dict | None = None")
+                    elif field_type == "bool":
+                        lines.append(f"    {field_name}: bool = False")
+                    else:
+                        opt = self._optional_type(field_type)
+                        lines.append(f"    {field_name}: {opt} = None")
+                    field_desc = field_name.replace("_", " ").capitalize()
+                    lines.append(f'    """{field_desc}."""')
+                    lines.append("")
 
         # Stub data classes (re-exported types from platform_interface)
         for stub in plan.stub_data_classes:
@@ -103,7 +153,7 @@ class PythonTypesGenerator(CodeGenerator):
             lines.append("")
             for field_name, field_type in stub.fields:
                 if field_type == "dict":
-                    lines.append(f"    {field_name}: dict = None")
+                    lines.append(f"    {field_name}: dict | None = None")
                 else:
                     opt = self._optional_type(field_type)
                     lines.append(f"    {field_name}: {opt} = None")
@@ -127,3 +177,18 @@ class PythonTypesGenerator(CodeGenerator):
         lines.append("")
 
         return {"types.py": "\n".join(lines)}
+
+    @staticmethod
+    def _flatten_sub_controls(sub_controls: list[SubControlPlan]) -> list[SubControlPlan]:
+        """Flatten a recursive sub-control tree (leaves first, deduplicated)."""
+        result: list[SubControlPlan] = []
+        seen: set[str] = set()
+        for sc in sub_controls:
+            for nested in PythonTypesGenerator._flatten_sub_controls(sc.sub_controls):
+                if nested.control_name not in seen:
+                    result.append(nested)
+                    seen.add(nested.control_name)
+            if sc.control_name not in seen:
+                result.append(sc)
+                seen.add(sc.control_name)
+        return result

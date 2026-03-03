@@ -82,6 +82,7 @@ _FLET_TYPE_MAP: dict[str, str | None] = {
     "double": "ft.Number",
     "num": "ft.Number",
     "Widget": "ft.Control",
+    "TextStyle": "ft.TextStyle",
     "Key": None,  # skip — not a user-facing property
 }
 
@@ -94,6 +95,7 @@ _FLET_DART_GETTER_MAP: dict[str, str] = {
     "ft.Color": 'control.getString("{name}")',
     "ft.Number": 'control.getDouble("{name}")',
     "ft.Control": 'buildWidget("{name}")',
+    "ft.TextStyle": 'control.getTextStyle("{name}", Theme.of(context))',
     "bool": 'control.getBool("{name}", false)!',
     "int": 'control.getInt("{name}")',
     "float": 'control.getDouble("{name}")',

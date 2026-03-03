@@ -9,6 +9,7 @@ and maps types.
 from __future__ import annotations
 
 import re
+from statistics import median
 
 from flet_pkg.core.models import (
     DartClass,
@@ -21,9 +22,11 @@ from flet_pkg.core.models import (
     MethodPlan,
     ParamPlan,
     PropertyPlan,
+    SiblingWidgetPlan,
     StubDataClass,
     SubControlPlan,
     SubModulePlan,
+    WidgetVariant,
 )
 from flet_pkg.core.parser import camel_to_snake, parse_dart_package_api
 from flet_pkg.core.type_map import (
@@ -179,7 +182,8 @@ class PackageAnalyzer:
                     plan.main_methods.append(method_plan)
 
         # Process enums — only keep those that are used or commonly useful
-        generated_type_names: set[str] = set()
+        # Start with any enums already added (e.g. family type enum)
+        generated_type_names: set[str] = {e.python_name for e in plan.enums}
         for dart_enum in api.enums:
             plan.enums.append(
                 EnumPlan(
@@ -386,7 +390,7 @@ class PackageAnalyzer:
         "BoxDecoration",
         "ShapeBorder",
         "BoxBorder",
-        "TextStyle",
+        # Note: TextStyle is handled by _FLET_TYPE_MAP -> ft.TextStyle
         # Controller types (complex objects, not properties)
         "AnimationController",
         "ScrollController",
@@ -407,33 +411,97 @@ class PackageAnalyzer:
 
         For ``ui_control`` extensions, widget constructor parameters become
         Flet control properties. Callback params become event handlers.
-        Selects the best-matching widget class (not merging all).
+
+        Dispatches to one of three strategies:
+        - **family**: Many widgets with shared params → single control + type enum
+        - **sibling**: 2-4 distinct widgets → separate controls
+        - **single**: One widget → original single-widget path
         """
-        # Select the best-matching widget class for the control name
         widget_classes = [c for c in api.classes if c.constructor_params]
         if not widget_classes:
             return
 
+        strategy, filtered = self._classify_multi_widgets(widget_classes, control_name)
+
+        if strategy == "family":
+            self._process_widget_family(api, plan, filtered, control_name)
+            return
+        if strategy == "sibling":
+            self._process_sibling_widgets(api, plan, filtered, control_name)
+            return
+
+        # "single" → original single-widget code path
+        self._process_single_widget(api, plan, widget_classes, control_name)
+
+    def _classify_multi_widgets(
+        self,
+        widget_classes: list[DartClass],
+        control_name: str,
+    ) -> tuple[str, list[DartClass]]:
+        """Classify widget classes into family, sibling, or single strategy.
+
+        Returns ``(strategy, filtered_classes)`` where strategy is one of
+        ``"family"``, ``"sibling"``, or ``"single"``.
+        """
+        # Filter out private/internal widgets (reuse _select_main_widget logic)
+        filtered = [
+            cls
+            for cls in widget_classes
+            if not cls.name.startswith("_")
+            and not any(cls.name.endswith(s) for s in self._INTERNAL_WIDGET_SUFFIXES)
+        ]
+        if not filtered:
+            filtered = widget_classes
+
+        if len(filtered) <= 1:
+            return ("single", filtered)
+
+        # Compute param name sets per widget (excluding framework params)
+        _FRAMEWORK_PARAMS = {"key", "child", "children"}
+        param_sets: list[set[str]] = []
+        for cls in filtered:
+            names = {p.name for p in cls.constructor_params if p.name not in _FRAMEWORK_PARAMS}
+            param_sets.append(names)
+
+        # Shared params = intersection of ALL widget param sets
+        shared = param_sets[0].copy()
+        for s in param_sets[1:]:
+            shared &= s
+
+        # Median param count across widgets
+        counts = [len(s) for s in param_sets]
+        med = median(counts) if counts else 1
+
+        shared_ratio = len(shared) / med if med > 0 else 0.0
+
+        # Family: ≥5 widgets, OR 2-4 with high overlap (≥0.6)
+        if len(filtered) >= 5 or (2 <= len(filtered) <= 4 and shared_ratio >= 0.6):
+            return ("family", filtered)
+
+        # Sibling: 2-4 widgets with low overlap
+        if 2 <= len(filtered) <= 4 and shared_ratio < 0.6:
+            return ("sibling", filtered)
+
+        return ("single", filtered)
+
+    def _process_single_widget(
+        self,
+        api: DartPackageAPI,
+        plan: GenerationPlan,
+        widget_classes: list[DartClass],
+        control_name: str,
+    ) -> None:
+        """Original single-widget processing path."""
         main_widget = self._select_main_widget(widget_classes, control_name)
         plan.dart_main_class = main_widget.name
 
-        # Build helper class lookup for type resolution
         helper_map: dict[str, DartClass] = {h.name: h for h in api.helper_classes}
-
-        # Track referenced helper types that need generation
         referenced_helpers: set[str] = set()
 
-        # Detect sub-controls (compound widgets)
         sub_controls = self._detect_sub_controls(
-            main_widget,
-            widget_classes,
-            api.component_classes,
-            helper_map,
-            plan,
+            main_widget, widget_classes, api.component_classes, helper_map, plan
         )
         plan.sub_controls = sub_controls
-
-        # Collect all sub-control names so they are not sanitized to dict
         sub_control_names = {sc.control_name for sc in self._flatten_sub_controls(sub_controls)}
 
         for param in main_widget.constructor_params:
@@ -454,10 +522,183 @@ class PackageAnalyzer:
                     if not any(p.python_name == result.python_name for p in plan.properties):
                         plan.properties.append(result)
 
-        # Generate dataclasses for referenced helper types (recursive)
+        self._generate_widget_helpers(api, plan, helper_map, referenced_helpers, sub_control_names)
+
+    def _process_widget_family(
+        self,
+        api: DartPackageAPI,
+        plan: GenerationPlan,
+        widget_classes: list[DartClass],
+        control_name: str,
+    ) -> None:
+        """Process a family of widgets with shared params into a single control + type enum."""
+        _FRAMEWORK_PARAMS = {"key", "child", "children"}
+
+        # Compute shared param names across all family members
+        param_sets = [
+            {p.name for p in cls.constructor_params if p.name not in _FRAMEWORK_PARAMS}
+            for cls in widget_classes
+        ]
+        shared_names = param_sets[0].copy()
+        for s in param_sets[1:]:
+            shared_names &= s
+
+        # Use widget with most params as "template" for types
+        template = max(widget_classes, key=lambda c: len(c.constructor_params))
+        plan.dart_main_class = template.name
+
+        helper_map: dict[str, DartClass] = {h.name: h for h in api.helper_classes}
+        referenced_helpers: set[str] = set()
+
+        # Process shared params via existing _process_widget_param
+        for param in template.constructor_params:
+            if param.name not in shared_names:
+                continue
+            result = self._process_widget_param(
+                param,
+                plan,
+                control_name,
+                helper_map,
+                referenced_helpers,
+                is_ui=True,
+                sub_control_names=set(),
+            )
+            if result is not None:
+                if isinstance(result, EventPlan):
+                    if not any(e.python_attr_name == result.python_attr_name for e in plan.events):
+                        plan.events.append(result)
+                else:
+                    if not any(p.python_name == result.python_name for p in plan.properties):
+                        plan.properties.append(result)
+
+        # Create WidgetVariant per class
+        control_lower = control_name.lower()
+        variants: list[WidgetVariant] = []
+        for cls in widget_classes:
+            # Strip control_name prefix to derive the variant value
+            raw_suffix = cls.name
+            if cls.name.lower().startswith(control_lower):
+                raw_suffix = cls.name[len(control_name) :]
+            enum_val = camel_to_snake(raw_suffix) if raw_suffix else cls.name.lower()
+            # Strip leading underscore from enum value
+            enum_val = enum_val.lstrip("_")
+            if not enum_val:
+                enum_val = cls.name.lower()
+            variants.append(WidgetVariant(dart_class_name=cls.name, enum_value=enum_val))
+
+        plan.widget_family_variants = variants
+
+        # Create the type enum
+        enum_name = f"{control_name}Type"
+        enum_values = [
+            (v.enum_value.upper(), v.enum_value, f"{v.dart_class_name} variant.") for v in variants
+        ]
+        family_enum = EnumPlan(
+            python_name=enum_name,
+            values=enum_values,
+            docstring=f"Widget variant type for {control_name}.",
+        )
+        plan.widget_family_enum = family_enum
+        plan.enums.insert(0, family_enum)
+
+        # Insert "type" property at the beginning of plan.properties
+        plan.properties.insert(
+            0,
+            PropertyPlan(
+                python_name="type",
+                python_type=f"{enum_name} | None",
+                default_value="None",
+                docstring=f"Widget variant type. One of {enum_name} values.",
+                dart_name="type",
+                dart_getter='widget.control.getString("type")',
+            ),
+        )
+
+        self._generate_widget_helpers(api, plan, helper_map, referenced_helpers, set())
+
+    def _process_sibling_widgets(
+        self,
+        api: DartPackageAPI,
+        plan: GenerationPlan,
+        widget_classes: list[DartClass],
+        control_name: str,
+    ) -> None:
+        """Process sibling widgets: one main + N siblings as separate controls."""
+        main_widget = self._select_main_widget(widget_classes, control_name)
+        plan.dart_main_class = main_widget.name
+
+        helper_map: dict[str, DartClass] = {h.name: h for h in api.helper_classes}
+        referenced_helpers: set[str] = set()
+
+        # Process main widget normally
+        sub_controls = self._detect_sub_controls(
+            main_widget, widget_classes, api.component_classes, helper_map, plan
+        )
+        plan.sub_controls = sub_controls
+        sub_control_names = {sc.control_name for sc in self._flatten_sub_controls(sub_controls)}
+
+        for param in main_widget.constructor_params:
+            result = self._process_widget_param(
+                param,
+                plan,
+                control_name,
+                helper_map,
+                referenced_helpers,
+                is_ui=True,
+                sub_control_names=sub_control_names,
+            )
+            if result is not None:
+                if isinstance(result, EventPlan):
+                    if not any(e.python_attr_name == result.python_attr_name for e in plan.events):
+                        plan.events.append(result)
+                else:
+                    if not any(p.python_name == result.python_name for p in plan.properties):
+                        plan.properties.append(result)
+
+        # Process each remaining widget as a sibling
+        for cls in widget_classes:
+            if cls.name == main_widget.name:
+                continue
+
+            sibling = SiblingWidgetPlan(
+                control_name=cls.name,
+                dart_class_name=cls.name,
+                control_name_snake=camel_to_snake(cls.name),
+            )
+
+            sib_helpers: set[str] = set()
+            for param in cls.constructor_params:
+                result = self._process_widget_param(
+                    param,
+                    plan,
+                    cls.name,
+                    helper_map,
+                    sib_helpers,
+                    is_ui=True,
+                    sub_control_names=set(),
+                )
+                if result is not None:
+                    if isinstance(result, EventPlan):
+                        sibling.events.append(result)
+                    else:
+                        sibling.properties.append(result)
+            referenced_helpers.update(sib_helpers)
+
+            plan.sibling_widgets.append(sibling)
+
+        self._generate_widget_helpers(api, plan, helper_map, referenced_helpers, sub_control_names)
+
+    def _generate_widget_helpers(
+        self,
+        api: DartPackageAPI,
+        plan: GenerationPlan,
+        helper_map: dict[str, DartClass],
+        referenced_helpers: set[str],
+        sub_control_names: set[str],
+    ) -> None:
+        """Generate dataclasses for referenced helper types (shared by all widget strategies)."""
         generated_names = {e.python_name for e in plan.enums}
         generated_names.update(s.python_name for s in plan.stub_data_classes)
-        # Add sub-control names so _post_sanitize doesn't replace them
         generated_names.update(sub_control_names)
         pending = list(referenced_helpers)
         while pending:
@@ -476,7 +717,6 @@ class PackageAnalyzer:
                     field_type = map_dart_type(method.return_type)
                     field_type = _sanitize_python_type(field_type, self._known_types)
                     fields.append((field_name, field_type))
-                    # Check if this field type references another helper
                     raw_base = re.sub(r"[?\s|].*", "", method.return_type).strip()
                     if raw_base in helper_map and raw_base not in generated_names:
                         pending.append(raw_base)
@@ -489,9 +729,6 @@ class PackageAnalyzer:
             )
             generated_names.add(helper_name)
 
-        # Post-process: re-sanitize property types against actually-generated
-        # type names.  Types from `known_types` (barrel analysis) that were
-        # NOT generated as Python classes must be replaced with `dict`.
         _post_sanitize_property_types(plan, generated_names)
 
     def _process_widget_param(
@@ -1072,7 +1309,7 @@ class PackageAnalyzer:
                     if "alert" in raw_name.lower() and "visual" not in prop_name:
                         prop_name = f"visual_{prop_name}"
                     enum_type = param.dart_type
-                    prop_type = f"Optional[{enum_type}]"
+                    prop_type = f"{enum_type} | None"
                     prop_default = "None"
                     prop_doc = method.docstring or f"The {prop_name.replace('_', ' ')}."
                     sdk_accessor = self._compute_sdk_accessor(
@@ -2084,7 +2321,7 @@ def _sanitize_python_type(
 
     # If it looks like a Dart class name (UpperCase), replace with dict
     if base and base[0].isupper() and base.isidentifier():
-        return "dict | None" if is_nullable else "dict | None"
+        return "dict | None" if is_nullable else "dict"
 
     return python_type
 

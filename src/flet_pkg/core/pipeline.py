@@ -140,8 +140,8 @@ class GenerationPipeline:
             if api.reexported_types:
                 try:
                     self.analyzer.resolve_platform_types(api, plan)
-                except Exception:
-                    pass  # Non-fatal: stubs remain as fallback
+                except Exception as e:
+                    result.warnings.append(f"Platform type resolution failed: {e}")
 
             n_methods = len(plan.main_methods) + sum(len(s.methods) for s in plan.sub_modules)
             console.print(
@@ -153,6 +153,12 @@ class GenerationPipeline:
                 n_sub = len(plan.sub_controls)
                 names = ", ".join(sc.control_name for sc in plan.sub_controls)
                 console.print(f"  [success]Detected {n_sub} sub-control(s): {names}[/success]")
+            if plan.widget_family_variants:
+                n_var = len(plan.widget_family_variants)
+                console.print(f"  [success]Widget family: {n_var} variants[/success]")
+            if plan.sibling_widgets:
+                sib_names = ", ".join(s.control_name for s in plan.sibling_widgets)
+                console.print(f"  [success]Sibling widgets: {sib_names}[/success]")
         except Exception as e:
             result.warnings.append(f"Analysis failed: {e}")
             console.print(f"  [warning]Analysis failed: {e}[/warning]")
@@ -179,8 +185,13 @@ class GenerationPipeline:
         python_pkg_dir = project_dir / "src" / package_name
         dart_src_dir = project_dir / "src" / "flutter" / package_name / "lib" / "src"
 
+        dart_lib_dir = project_dir / "src" / "flutter" / package_name / "lib"
+
         for filename, content in all_files.items():
-            if filename.endswith(".dart"):
+            if filename == "extension.dart":
+                # extension.dart lives at lib/extension.dart (not lib/src/)
+                target = dart_lib_dir / filename
+            elif filename.endswith(".dart"):
                 target = dart_src_dir / filename
             else:
                 target = python_pkg_dir / filename
@@ -230,9 +241,11 @@ class GenerationPipeline:
                 pass
 
         # Check for conflicting Dart stubs
+        # Don't protect extension.dart if we generated our own
+        protect_extension = "extension.dart" not in generated_files
         for dart_file in dart_src_dir.glob("*.dart"):
             name = dart_file.name
-            if name in generated_dart or name == "extension.dart":
+            if name in generated_dart or (name == "extension.dart" and protect_extension):
                 continue
             try:
                 content = dart_file.read_text(encoding="utf-8")
