@@ -30,28 +30,113 @@ EXTENSION_TYPES = {
 
 
 def create(
+    # -- Package options --
     extension_type: Optional[str] = typer.Option(
-        None, "--type", "-t", help="Extension type: auto, service or ui_control."
+        None,
+        "--type",
+        "-t",
+        help="Extension type: [cyan]auto[/cyan], [cyan]service[/cyan] or [cyan]ui_control[/cyan].",
+        rich_help_panel="Package Options",
     ),
     flutter_package: Optional[str] = typer.Option(
-        None, "--flutter-package", "-f", help="Flutter package name from pub.dev."
+        None,
+        "--flutter-package",
+        "-f",
+        help="Flutter package name from [link=https://pub.dev]pub.dev[/link].",
+        rich_help_panel="Package Options",
     ),
-    output: Optional[Path] = typer.Option(None, "--output", "-o", help="Output directory."),
+    output: Optional[Path] = typer.Option(
+        None,
+        "--output",
+        "-o",
+        help="Output directory for the generated project.",
+        rich_help_panel="Package Options",
+    ),
+    local_package: Optional[Path] = typer.Option(
+        None,
+        "--local-package",
+        "-l",
+        help="Path to a local Flutter package (skips pub.dev download).",
+        rich_help_panel="Package Options",
+    ),
+    # -- Code generation options --
     analyze: bool = typer.Option(
         True,
         "--analyze/--no-analyze",
-        help="Analyze Flutter package and generate rich code (default: True).",
-    ),
-    local_package: Optional[Path] = typer.Option(
-        None, "--local-package", "-l", help="Path to a local Flutter package (skip download)."
+        help=(
+            "Analyze the Flutter package and auto-generate Python controls, "
+            "type mappings, and Dart bridge code."
+        ),
+        rich_help_panel="Code Generation",
     ),
     console_module: Optional[bool] = typer.Option(
         None,
         "--console/--no-console",
-        help="Include debug console module (default: True).",
+        help="Include a debug console module for development logging.",
+        rich_help_panel="Code Generation",
+    ),
+    # -- AI refinement options --
+    ai_refine: Optional[bool] = typer.Option(
+        None,
+        "--ai-refine/--no-ai-refine",
+        help=(
+            "Run AI-powered refinement on generated code. "
+            "An LLM analyzes coverage gaps and applies structured edits "
+            "using the Architect/Editor pattern. "
+            "Install: [cyan]uv add flet-pkg\\[ai][/cyan]. "
+            "Set the API key for your provider (e.g. ANTHROPIC_API_KEY). "
+            "In interactive mode, you will be prompted if pydantic-ai is installed."
+        ),
+        rich_help_panel="AI Refinement",
+    ),
+    ai_provider: Optional[str] = typer.Option(
+        None,
+        "--ai-provider",
+        help=(
+            "AI provider: "
+            "[cyan]ollama[/cyan] (local, free — no API key), "
+            "[cyan]anthropic[/cyan] (Claude), "
+            "[cyan]openai[/cyan] (GPT), or "
+            "[cyan]google[/cyan] (Gemini). "
+            "Cloud providers need an API key via env var: "
+            "ANTHROPIC_API_KEY, OPENAI_API_KEY, or GOOGLE_API_KEY. "
+            "[dim]\\[default: ollama][/dim]"
+        ),
+        rich_help_panel="AI Refinement",
+    ),
+    ai_model: Optional[str] = typer.Option(
+        None,
+        "--ai-model",
+        help=(
+            "Override the default model for the selected provider. "
+            "Defaults: anthropic=[dim]claude-sonnet-4-6[/dim], "
+            "openai=[dim]gpt-4.1-mini[/dim], "
+            "google=[dim]gemini-2.5-flash[/dim], "
+            "ollama=[dim]qwen2.5-coder[/dim]."
+        ),
+        rich_help_panel="AI Refinement",
     ),
 ) -> None:
-    """Create a new Flet extension package."""
+    """[bold]Create a new Flet extension package.[/bold]
+
+    Scaffolds a complete project structure and optionally analyzes the Flutter
+    package to auto-generate Python controls, Dart bridge code, type mappings,
+    event handlers, and enum definitions.
+
+    [dim]AI refinement (--ai-refine) uses an LLM to detect and fill coverage
+    gaps that the deterministic pipeline missed. Requires the \\[ai] extra:[/dim]
+
+    [green]$[/green] uv add flet-pkg\\[ai]
+    [green]$[/green] ollama pull qwen2.5-coder              [dim]# free, local[/dim]
+    [green]$[/green] flet-pkg create -f shimmer --ai-refine  [dim]# uses Ollama[/dim]
+
+    [dim]Or use a cloud provider (requires API key):[/dim]
+
+    [green]$[/green] export ANTHROPIC_API_KEY=sk-...
+    [green]$[/green] flet-pkg create -f shimmer --ai-refine --ai-provider anthropic
+
+    [dim]Run without flags for interactive mode, or pass flags for CI/scripting.[/dim]
+    """
     header_panel("Flet Extension Generator", "Create a new Flet extension")
 
     # Extension type
@@ -122,6 +207,14 @@ def create(
     if console_module is None:
         console_module = ask_confirm("Include debug console module?", default=True)
 
+    # AI refinement
+    if ai_refine is None and analyze:
+        ai_refine = _ask_ai_refine()
+        if ai_refine and ai_provider is None:
+            ai_provider = _ask_ai_provider()
+    if ai_refine is None:
+        ai_refine = False
+
     context = {
         "project_name": project_name,
         "package_name": package_name,
@@ -170,6 +263,9 @@ def create(
                 local_package=local_package,
                 control_name_snake=context["control_name_snake"],
                 include_console=console_module,
+                ai_refine=ai_refine,
+                ai_provider=ai_provider,
+                ai_model=ai_model,
             )
 
             if result.warnings:
@@ -262,3 +358,56 @@ def _check_existing_packages(project_name: str) -> None:
     console.print()
     if not ask_confirm("Continue anyway?"):
         raise typer.Exit(0)
+
+
+AI_PROVIDERS = {
+    1: ("ollama", "Ollama (local, free — no API key)"),
+    2: ("anthropic", "Anthropic (Claude — requires API key)"),
+    3: ("openai", "OpenAI (GPT — requires API key)"),
+    4: ("google", "Google (Gemini — requires API key)"),
+}
+
+
+def _ask_ai_refine() -> bool:
+    """Ask the user whether to enable AI refinement."""
+    try:
+        import pydantic_ai  # noqa: F401  # ty: ignore[unresolved-import]
+
+        return ask_confirm("Run AI refinement on generated code?", default=False)
+    except ImportError:
+        return False
+
+
+def _ask_ai_provider() -> str:
+    """Ask the user to choose an AI provider."""
+    choice = ask_choice("AI provider:", [(k, v[1]) for k, v in AI_PROVIDERS.items()])
+    provider = AI_PROVIDERS[choice][0]
+
+    if provider == "ollama":
+        from flet_pkg.core.ai.config import AIConfig
+
+        config = AIConfig.load(provider="ollama")
+        console.print(
+            f"\n  [info]Ollama uses local models (no API key needed).[/info]\n"
+            f"  [dim]Default model: {config.model}[/dim]\n"
+            f"  [dim]Make sure Ollama is running: ollama serve[/dim]\n"
+            f"  [dim]Pull the model first: ollama pull {config.model}[/dim]"
+        )
+    else:
+        from flet_pkg.core.ai.config import AIConfig
+
+        config = AIConfig.load(provider=provider)
+        if not config.is_available():
+            import os
+
+            env_var = {"anthropic": "ANTHROPIC_API_KEY", "openai": "OPENAI_API_KEY"}.get(
+                provider, "GOOGLE_API_KEY"
+            )
+            current = os.environ.get(env_var, "")
+            if not current:
+                console.print(
+                    f"\n  [warning]No {env_var} found. "
+                    f"Set it before running or AI will be skipped.[/warning]"
+                )
+
+    return provider

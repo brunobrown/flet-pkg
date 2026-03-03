@@ -33,6 +33,9 @@ dependencies = [
     "httpx>=0.27.0",
 ]
 
+[project.optional-dependencies]
+ai = ["pydantic-ai>=1.64.0"]
+
 [project.scripts]
 flet-pkg = "flet_pkg.main:app"
 

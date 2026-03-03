@@ -45,6 +45,7 @@ class TestCLI:
                 "onesignal_flutter",
                 "--output",
                 str(tmp_path),
+                "--no-ai-refine",
             ],
             input="flet-onesignal\nflet_onesignal\nOneSignal\nA test\nAuthor\ny\n",
         )
@@ -64,6 +65,7 @@ class TestCLI:
                 "flutter_spinkit",
                 "--output",
                 str(tmp_path),
+                "--no-ai-refine",
             ],
             input="flet-spinkit\nflet_spinkit\nSpinkit\nA widget\nAuthor\ny\n",
         )

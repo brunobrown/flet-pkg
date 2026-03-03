@@ -59,6 +59,9 @@ class GenerationPipeline:
         local_package: Path | None = None,
         control_name_snake: str = "",
         include_console: bool = True,
+        ai_refine: bool = False,
+        ai_provider: str | None = None,
+        ai_model: str | None = None,
     ) -> PipelineResult:
         """Run the full generation pipeline.
 
@@ -72,6 +75,9 @@ class GenerationPipeline:
             local_package: If set, use this local path instead of downloading.
             control_name_snake: Snake_case name for files (matches template context).
             include_console: Whether to include debug console module (default: True).
+            ai_refine: If True, run AI refinement after generation.
+            ai_provider: AI provider name (anthropic, openai, google, ollama).
+            ai_model: AI model name override.
 
         Returns:
             PipelineResult with generated file list and warnings.
@@ -181,6 +187,31 @@ class GenerationPipeline:
             except Exception as e:
                 result.warnings.append(f"Generator {gen.__class__.__name__} failed: {e}")
 
+        # Step 4.5: AI Refinement (optional)
+        if ai_refine:
+            try:
+                from flet_pkg.core.ai.config import AIConfig
+                from flet_pkg.core.ai.refiner import AIRefiner
+
+                config = AIConfig.load(provider=ai_provider, model=ai_model)
+                if config.is_available():
+                    console.print("  [info]Running AI refinement...[/info]")
+                    refiner = AIRefiner(config)
+                    ai_result = refiner.refine(api, plan, all_files, extension_type, package_path)
+                    if ai_result.edits_applied > 0:
+                        console.print(
+                            f"  [success]AI refined: {ai_result.edits_applied} edits applied"
+                            f"[/success]"
+                        )
+                    if not ai_result.validation_passed and ai_result.edits_applied > 0:
+                        result.warnings.append("AI edits failed validation — using originals")
+                else:
+                    console.print("  [warning]AI skipped: no API key configured[/warning]")
+            except ImportError:
+                console.print("  [warning]AI skipped: install with uv add flet-pkg[ai][/warning]")
+            except Exception as e:
+                result.warnings.append(_format_ai_error(e))
+
         # Step 5: Write files (overwriting template stubs)
         python_pkg_dir = project_dir / "src" / package_name
         dart_src_dir = project_dir / "src" / "flutter" / package_name / "lib" / "src"
@@ -253,3 +284,19 @@ class GenerationPipeline:
                     dart_file.unlink()
             except Exception:
                 pass
+
+
+def _format_ai_error(exc: Exception) -> str:
+    """Format AI provider errors into user-friendly messages."""
+    msg = str(exc)
+
+    if "insufficient_quota" in msg or "exceeded" in msg.lower():
+        return "AI skipped: API quota exceeded. Check your billing at your provider's dashboard."
+    if "401" in msg or "invalid_api_key" in msg or "Unauthorized" in msg:
+        return "AI skipped: invalid API key. Verify your API key environment variable is correct."
+    if "rate_limit" in msg or "429" in msg:
+        return "AI skipped: rate limit reached. Try again later."
+    if "timeout" in msg.lower() or "timed out" in msg.lower():
+        return "AI skipped: request timed out. Try again later."
+
+    return f"AI refinement failed: {msg}"
