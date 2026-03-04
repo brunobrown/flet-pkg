@@ -40,11 +40,14 @@ class PythonControlGenerator(CodeGenerator):
         if needs_field:
             lines.append("from dataclasses import field")
 
-        # Only import Any when needed (service _invoke_method or method signatures)
+        # Only import Any when needed (service _invoke_method, method signatures,
+        # properties, or sub-control properties)
         needs_any = (
             is_service
             or any("Any" in p.python_type for m in plan.main_methods for p in m.params)
             or any("Any" in m.return_type for m in plan.main_methods)
+            or any("Any" in p.python_type for p in plan.properties)
+            or any("Any" in p.python_type for sc in plan.sub_controls for p in sc.properties)
         )
         if needs_any:
             lines.append("from typing import Any, Optional")
@@ -275,7 +278,11 @@ class PythonControlGenerator(CodeGenerator):
         needs_field = any(p.default_value.startswith("field(") for p in sibling.properties)
         if needs_field:
             lines.append("from dataclasses import field")
-        lines.append("from typing import Optional")
+        needs_any = any("Any" in p.python_type for p in sibling.properties)
+        if needs_any:
+            lines.append("from typing import Any, Optional")
+        else:
+            lines.append("from typing import Optional")
         lines.append("")
         lines.append("import flet as ft")
         lines.append("")
