@@ -14,7 +14,7 @@ _PROVIDER_DEFAULTS: dict[str, tuple[str, str]] = {
     "anthropic": ("claude-sonnet-4-6", "ANTHROPIC_API_KEY"),
     "openai": ("gpt-4.1-mini", "OPENAI_API_KEY"),
     "google": ("gemini-2.5-flash", "GOOGLE_API_KEY"),
-    "ollama": ("qwen2.5-coder", ""),
+    "ollama": ("qwen2.5-coder:14b", ""),
 }
 
 
@@ -76,3 +76,24 @@ class AIConfig:
         if self.provider == "ollama":
             return True
         return bool(self.api_key)
+
+
+def list_ollama_models() -> list[str]:
+    """Query the Ollama API for locally installed models.
+
+    Returns a list of model names (e.g. ``["qwen2.5-coder:7b", "llama3:8b"]``).
+    Returns an empty list if Ollama is unreachable.
+    """
+    import httpx
+
+    base = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
+    # Strip /v1 suffix if present (the tags endpoint is on the base URL)
+    base = base.removesuffix("/v1")
+
+    try:
+        resp = httpx.get(f"{base}/api/tags", timeout=5.0)
+        resp.raise_for_status()
+        data = resp.json()
+        return [m["name"] for m in data.get("models", [])]
+    except Exception:
+        return []

@@ -210,6 +210,9 @@ class GenerationPipeline:
             except ImportError:
                 console.print("  [warning]AI skipped: install with uv add flet-pkg[ai][/warning]")
             except Exception as e:
+                import logging
+
+                logging.debug("AI refinement error: %s", e, exc_info=True)
                 result.warnings.append(_format_ai_error(e))
 
         # Step 5: Write files (overwriting template stubs)
@@ -289,14 +292,26 @@ class GenerationPipeline:
 def _format_ai_error(exc: Exception) -> str:
     """Format AI provider errors into user-friendly messages."""
     msg = str(exc)
+    lower = msg.lower()
 
-    if "insufficient_quota" in msg or "exceeded" in msg.lower():
+    if "insufficient_quota" in msg or "billing" in lower:
         return "AI skipped: API quota exceeded. Check your billing at your provider's dashboard."
     if "401" in msg or "invalid_api_key" in msg or "Unauthorized" in msg:
         return "AI skipped: invalid API key. Verify your API key environment variable is correct."
     if "rate_limit" in msg or "429" in msg:
         return "AI skipped: rate limit reached. Try again later."
-    if "timeout" in msg.lower() or "timed out" in msg.lower():
+    if "timeout" in lower or "timed out" in lower:
         return "AI skipped: request timed out. Try again later."
+    if "context length" in lower or "too long" in lower:
+        return (
+            "AI skipped: input too long for the model's context window. "
+            "Try a model with a larger context or reduce the package size."
+        )
+    if "maximum retries" in lower or "output validation" in lower:
+        return (
+            "AI skipped: model failed to produce valid structured output. "
+            "Try a larger model (e.g. --ai-model qwen2.5-coder:32b) "
+            "or use a cloud provider (--ai-provider anthropic)."
+        )
 
     return f"AI refinement failed: {msg}"

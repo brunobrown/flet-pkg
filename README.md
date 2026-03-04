@@ -49,6 +49,11 @@
   - [Free (Ollama - Local)](#free-ollama---local)
   - [Cloud Providers](#cloud-providers)
   - [How AI Refinement Works](#how-ai-refinement-works)
+- [MCP Server](#mcp-server)
+  - [Installation](#mcp-installation)
+  - [Claude Desktop Configuration](#claude-desktop-configuration)
+  - [Available Tools](#available-tools)
+  - [Resources & Prompts](#resources--prompts)
 - [Generated Project Structure](#generated-project-structure)
 - [Name Conflict Detection](#name-conflict-detection)
 - [Generation Pipeline](#generation-pipeline)
@@ -78,6 +83,16 @@ uv add flet-pkg[ai]
 
 # Using pip
 pip install flet-pkg[ai]
+```
+
+To enable the **MCP server** (optional — for AI agent integrations):
+
+```bash
+# Using UV
+uv add flet-pkg[mcp]
+
+# Using pip
+pip install flet-pkg[mcp]
 ```
 
 **Requirements:** Python 3.11+
@@ -296,6 +311,78 @@ Step 4: Validator (deterministic, no LLM)
 ├── If errors: feeds back to Editor (max 2 retries)
 └── Writes the refined files
 ```
+
+---
+
+## MCP Server
+
+flet-pkg includes an **MCP (Model Context Protocol) server** that exposes its scaffolding and code generation capabilities to AI agents like Claude Desktop, Cursor, and VS Code Copilot. This complements the CLI by allowing AI assistants to create Flet extensions programmatically.
+
+### MCP Installation
+
+```bash
+# Install with MCP support
+uv add flet-pkg[mcp]    # or: pip install flet-pkg[mcp]
+
+# Verify it works
+flet-pkg-mcp
+```
+
+### Claude Desktop Configuration
+
+Add to your Claude Desktop config (`~/.config/claude/claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "flet-pkg": {
+      "command": "flet-pkg-mcp"
+    }
+  }
+}
+```
+
+Or use `uvx` (no install needed):
+
+```json
+{
+  "mcpServers": {
+    "flet-pkg": {
+      "command": "uvx",
+      "args": ["--from", "flet-pkg[mcp]", "flet-pkg-mcp"]
+    }
+  }
+}
+```
+
+### Available Tools
+
+| Tool | Description | Network |
+|------|-------------|---------|
+| `tool_derive_names` | Derive project/package/control names from a Flutter package name | No |
+| `tool_map_dart_type` | Convert a Dart type to its Python/Flet equivalent | No |
+| `tool_fetch_metadata` | Get pub.dev package metadata (version, description, homepage) | Yes (cached) |
+| `tool_detect_extension_type` | Auto-detect whether a package is a service or ui_control | Yes (cached) |
+| `tool_scaffold` | Create a project skeleton from a template | No |
+| `tool_run_pipeline` | Full pipeline: download, parse, analyze, generate, write | Yes (cached) |
+| `tool_analyze_gaps` | Deterministic coverage gap analysis (no LLM) | Yes (cached) |
+
+### Resources & Prompts
+
+**Resources:**
+
+| URI | Description |
+|-----|-------------|
+| `flet-pkg://type-map` | Full Dart-to-Python type mapping table |
+| `flet-pkg://templates` | Available template names (service, ui_control) |
+
+**Prompts:**
+
+| Prompt | Description |
+|--------|-------------|
+| `scaffold_service` | Step-by-step guide to scaffold a service extension |
+| `scaffold_ui_control` | Step-by-step guide to scaffold a UI control extension |
+| `analyze_package` | Guide to analyze coverage without scaffolding |
 
 ---
 

@@ -112,7 +112,7 @@ def create(
             "Defaults: anthropic=[dim]claude-sonnet-4-6[/dim], "
             "openai=[dim]gpt-4.1-mini[/dim], "
             "google=[dim]gemini-2.5-flash[/dim], "
-            "ollama=[dim]qwen2.5-coder[/dim]."
+            "ollama=[dim]qwen2.5-coder:14b[/dim]."
         ),
         rich_help_panel="AI Refinement",
     ),
@@ -127,7 +127,7 @@ def create(
     gaps that the deterministic pipeline missed. Requires the \\[ai] extra:[/dim]
 
     [green]$[/green] uv add flet-pkg\\[ai]
-    [green]$[/green] ollama pull qwen2.5-coder              [dim]# free, local[/dim]
+    [green]$[/green] ollama pull qwen2.5-coder:14b              [dim]# free, local[/dim]
     [green]$[/green] flet-pkg create -f shimmer --ai-refine  [dim]# uses Ollama[/dim]
 
     [dim]Or use a cloud provider (requires API key):[/dim]
@@ -211,7 +211,9 @@ def create(
     if ai_refine is None and analyze:
         ai_refine = _ask_ai_refine()
         if ai_refine and ai_provider is None:
-            ai_provider = _ask_ai_provider()
+            ai_provider, detected_model = _ask_ai_provider()
+            if detected_model and ai_model is None:
+                ai_model = detected_model
     if ai_refine is None:
         ai_refine = False
 
@@ -371,28 +373,26 @@ AI_PROVIDERS = {
 def _ask_ai_refine() -> bool:
     """Ask the user whether to enable AI refinement."""
     try:
-        import pydantic_ai  # noqa: F401  # ty: ignore[unresolved-import]
+        import pydantic_ai  # noqa: F401
 
         return ask_confirm("Run AI refinement on generated code?", default=False)
     except ImportError:
         return False
 
 
-def _ask_ai_provider() -> str:
-    """Ask the user to choose an AI provider."""
+def _ask_ai_provider() -> tuple[str, str | None]:
+    """Ask the user to choose an AI provider.
+
+    Returns:
+        Tuple of (provider, model).  *model* is ``None`` unless the user
+        picked a specific Ollama model interactively.
+    """
     choice = ask_choice("AI provider:", [(k, v[1]) for k, v in AI_PROVIDERS.items()])
     provider = AI_PROVIDERS[choice][0]
+    model: str | None = None
 
     if provider == "ollama":
-        from flet_pkg.core.ai.config import AIConfig
-
-        config = AIConfig.load(provider="ollama")
-        console.print(
-            f"\n  [info]Ollama uses local models (no API key needed).[/info]\n"
-            f"  [dim]Default model: {config.model}[/dim]\n"
-            f"  [dim]Make sure Ollama is running: ollama serve[/dim]\n"
-            f"  [dim]Pull the model first: ollama pull {config.model}[/dim]"
-        )
+        model = _detect_ollama_model()
     else:
         from flet_pkg.core.ai.config import AIConfig
 
@@ -410,4 +410,37 @@ def _ask_ai_provider() -> str:
                     f"Set it before running or AI will be skipped.[/warning]"
                 )
 
-    return provider
+    return provider, model
+
+
+def _detect_ollama_model() -> str | None:
+    """Detect installed Ollama models and let the user pick one.
+
+    Returns the selected model name, or ``None`` to use the default.
+    """
+    from flet_pkg.core.ai.config import AIConfig, list_ollama_models
+
+    config = AIConfig.load(provider="ollama")
+
+    with console.status("[info]Detecting Ollama models...[/info]", spinner="dots"):
+        models = list_ollama_models()
+
+    if not models:
+        console.print(
+            f"\n  [warning]Could not connect to Ollama or no models installed.[/warning]\n"
+            f"  [dim]Make sure Ollama is running: ollama serve[/dim]\n"
+            f"  [dim]Pull a model first: ollama pull {config.model}[/dim]"
+        )
+        return None
+
+    if len(models) == 1:
+        selected = models[0]
+        console.print(f"\n  [success]Ollama model detected: {selected}[/success]")
+        return selected
+
+    # Multiple models — let the user choose
+    console.print(f"\n  [info]Found {len(models)} Ollama models:[/info]")
+    model_choices = [(i + 1, m) for i, m in enumerate(models)]
+    idx = ask_choice("Select model:", model_choices)
+    selected = models[idx - 1]
+    return selected

@@ -163,6 +163,134 @@ class TestScaffolder:
         example_content = example_file.read_text()
         assert "on_error" in example_content
 
+    def test_generates_about_pkg_flet_guide(self, tmp_path, service_context):
+        scaffolder = Scaffolder("service", service_context, tmp_path)
+        project_dir = scaffolder.generate()
+
+        guide = project_dir / "about_pkg_flet.md"
+        assert guide.exists()
+        content = guide.read_text()
+
+        # Context variables are rendered
+        assert "flet-test" in content
+        assert "flet_test" in content
+        assert "TestControl" in content
+        assert "test_control" in content
+        assert "test_flutter" in content
+
+        # All 4 part headers present
+        assert "Part 1" in content
+        assert "Part 2" in content
+        assert "Part 3" in content
+        assert "Part 4" in content
+
+        # Skill-level labels
+        assert "Beginner" in content
+        assert "Intermediate" in content
+        assert "Advanced" in content
+        assert "Practical" in content
+
+        # Branding header
+        assert "About Package for Flet" in content
+        assert "flet-pkg" in content
+
+        # Analogy
+        assert "remote control" in content
+
+        # Debugging checklist
+        assert "Debugging Checklist" in content
+        assert "page.update()" in content
+
+        # LogCat section
+        assert "Android LogCat" in content
+        assert "flet_log.py" in content
+        assert "flet_log.sh" in content
+
+        # Scripts directory exists with both files
+        assert (project_dir / "scripts" / "flet_log.py").exists()
+        assert (project_dir / "scripts" / "flet_log.sh").exists()
+
+        # Service-specific content
+        assert "ft.Service" in content
+        assert "createService" in content
+
+        # Wheel / uv build section
+        assert "uv build" in content
+        assert "py3-none-any.whl" in content
+
+        # No unrendered Jinja2 variables remain
+        assert "{{" not in content
+        assert "}}" not in content
+
+    def test_ui_control_generates_about_pkg_flet_guide(self, tmp_path):
+        context = {
+            "project_name": "flet-mywidget",
+            "package_name": "flet_mywidget",
+            "control_name": "MyWidget",
+            "control_name_snake": "my_widget",
+            "flutter_package": "my_widget_flutter",
+            "description": "A widget extension",
+            "author": "Test",
+            "include_console": True,
+        }
+        scaffolder = Scaffolder("ui_control", context, tmp_path)
+        project_dir = scaffolder.generate()
+
+        guide = project_dir / "about_pkg_flet.md"
+        assert guide.exists()
+        content = guide.read_text()
+
+        # Context variables are rendered
+        assert "flet-mywidget" in content
+        assert "flet_mywidget" in content
+        assert "MyWidget" in content
+        assert "my_widget" in content
+        assert "my_widget_flutter" in content
+
+        # All 4 part headers present
+        assert "Part 1" in content
+        assert "Part 2" in content
+        assert "Part 3" in content
+        assert "Part 4" in content
+
+        # Skill-level labels
+        assert "Beginner" in content
+        assert "Intermediate" in content
+        assert "Advanced" in content
+        assert "Practical" in content
+
+        # Branding header
+        assert "About Package for Flet" in content
+        assert "flet-pkg" in content
+
+        # Analogy
+        assert "remote control" in content
+
+        # Debugging checklist
+        assert "Debugging Checklist" in content
+        assert "page.update()" in content
+
+        # LogCat section
+        assert "Android LogCat" in content
+        assert "flet_log.py" in content
+        assert "flet_log.sh" in content
+
+        # Scripts directory exists with both files
+        assert (project_dir / "scripts" / "flet_log.py").exists()
+        assert (project_dir / "scripts" / "flet_log.sh").exists()
+
+        # UI Control-specific content
+        assert "ft.LayoutControl" in content
+        assert "createWidget" in content
+
+        # Wheel / uv build section
+        assert "uv build" in content
+        assert "py3-none-any.whl" in content
+
+        # No unrendered Jinja2 variables remain
+        assert "{{" not in content
+        assert "}}" not in content
+
     def test_ui_control_stub_has_on_error(self, tmp_path):
         context = {
             "project_name": "flet-mywidget",

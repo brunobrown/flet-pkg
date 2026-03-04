@@ -56,13 +56,14 @@ def build_architect_agent(model: Any) -> Any:
     Returns:
         A pydantic-ai Agent configured for the Architect role.
     """
-    from pydantic_ai import Agent, RunContext  # ty: ignore[unresolved-import]
+    from pydantic_ai import Agent, RunContext
 
     agent = Agent(
         model,
         deps_type=ArchitectDeps,
         output_type=ArchitectPlan,
         system_prompt=ARCHITECT_SYSTEM_PROMPT,
+        retries=3,
     )
 
     @agent.tool
@@ -109,13 +110,14 @@ def build_editor_agent(model: Any) -> Any:
     Returns:
         A pydantic-ai Agent configured for the Editor role.
     """
-    from pydantic_ai import Agent, RunContext  # ty: ignore[unresolved-import]
+    from pydantic_ai import Agent, RunContext
 
     agent = Agent(
         model,
         deps_type=EditorDeps,
         output_type=EditorResult,
         system_prompt=EDITOR_SYSTEM_PROMPT,
+        retries=3,
     )
 
     @agent.tool

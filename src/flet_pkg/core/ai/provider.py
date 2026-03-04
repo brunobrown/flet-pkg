@@ -25,8 +25,8 @@ def create_model(config: AIConfig) -> Any:
         ValueError: If the provider is not supported.
     """
     try:
-        from pydantic_ai.models.anthropic import AnthropicModel  # ty: ignore[unresolved-import]
-        from pydantic_ai.models.openai import OpenAIChatModel  # ty: ignore[unresolved-import]
+        from pydantic_ai.models.anthropic import AnthropicModel
+        from pydantic_ai.models.openai import OpenAIChatModel
     except ImportError:
         raise ImportError("AI refinement requires pydantic-ai. Install with: uv add flet-pkg[ai]")
 
@@ -38,7 +38,7 @@ def create_model(config: AIConfig) -> Any:
 
     if config.provider == "google":
         try:
-            from pydantic_ai.models.google import GoogleModel  # ty: ignore[unresolved-import]
+            from pydantic_ai.models.google import GoogleModel
 
             return GoogleModel(config.model)
         except ImportError:
@@ -47,7 +47,7 @@ def create_model(config: AIConfig) -> Any:
             )
 
     if config.provider == "ollama":
-        from pydantic_ai.providers.ollama import OllamaProvider  # ty: ignore[unresolved-import]
+        from pydantic_ai.providers.ollama import OllamaProvider
 
         return OpenAIChatModel(
             config.model,

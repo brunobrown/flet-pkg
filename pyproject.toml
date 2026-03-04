@@ -34,10 +34,12 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-ai = ["pydantic-ai>=1.64.0"]
+ai = ["pydantic-ai>=1.0.0"]
+mcp = ["mcp[cli]>=1.0.0"]
 
 [project.scripts]
 flet-pkg = "flet_pkg.main:app"
+flet-pkg-mcp = "flet_pkg.mcp.server:main"
 
 [project.urls]
 Homepage = "https://github.com/brunobrown/flet-pkg"
@@ -53,6 +55,8 @@ packages = ["src/flet_pkg"]
 dev = [
     "pytest>=8.0",
     "pytest-cov>=7.0.0",
+    "pytest-asyncio>=0.24.0",
+    "mcp[cli]>=1.0.0",
 ]
 docs = [
     "mkdocs>=1.6.0",

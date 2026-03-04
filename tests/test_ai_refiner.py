@@ -246,7 +246,7 @@ class TestAIConfig:
     def test_load_default_is_ollama(self):
         config = AIConfig.load()
         assert config.provider == "ollama"
-        assert config.model == "qwen2.5-coder"
+        assert config.model == "qwen2.5-coder:14b"
         assert config.is_available()
 
     def test_load_anthropic(self):
@@ -267,7 +267,7 @@ class TestAIConfig:
     def test_load_ollama_no_key_needed(self):
         config = AIConfig.load(provider="ollama")
         assert config.provider == "ollama"
-        assert config.model == "qwen2.5-coder"
+        assert config.model == "qwen2.5-coder:14b"
         assert config.is_available()
 
     def test_load_with_model_override(self):

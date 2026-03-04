@@ -19,7 +19,7 @@ app = typer.Typer(
         "  Uses the Architect/Editor pattern to analyze coverage gaps and\n"
         "  auto-improve the generated code with LLM-powered edits.\n\n"
         "  [green]$[/green] uv add flet-pkg\\[ai]            [dim]# install AI deps[/dim]\n"
-        "  [green]$[/green] ollama pull qwen2.5-coder     [dim]# free, local[/dim]\n"
+        "  [green]$[/green] ollama pull qwen2.5-coder:14b     [dim]# free, local[/dim]\n"
         "  [green]$[/green] flet-pkg create --ai-refine   [dim]# uses Ollama by default[/dim]\n\n"
         "  Providers: [cyan]ollama[/cyan] (default, free), [cyan]anthropic[/cyan], "
         "[cyan]openai[/cyan], [cyan]google[/cyan]\n\n"
