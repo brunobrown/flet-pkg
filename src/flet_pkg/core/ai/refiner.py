@@ -55,6 +55,7 @@ class AIRefiner:
         generated_files: dict[str, str],
         extension_type: str,
         package_path: Path | None = None,
+        verbose: bool = False,
     ) -> RefinementResult:
         """Run the full AI refinement pipeline.
 
@@ -64,12 +65,13 @@ class AIRefiner:
             generated_files: Dict of filename → content from generators.
             extension_type: "service" or "ui_control".
             package_path: Path to the downloaded Flutter package source.
+            verbose: If True, print detailed progress at each step.
 
         Returns:
             RefinementResult with gap report, edits applied, and validation status.
         """
         return asyncio.run(
-            self._refine_async(api, plan, generated_files, extension_type, package_path)
+            self._refine_async(api, plan, generated_files, extension_type, package_path, verbose)
         )
 
     async def _refine_async(
@@ -79,11 +81,24 @@ class AIRefiner:
         generated_files: dict[str, str],
         extension_type: str,
         package_path: Path | None = None,
+        verbose: bool = False,
     ) -> RefinementResult:
         """Async implementation of the refinement pipeline."""
+        from flet_pkg.ui.console import console
+
         # Step 1: Gap Report (deterministic — no LLM)
         gap_analyzer = GapAnalyzer()
         gap_report = gap_analyzer.analyze(api, plan, extension_type)
+
+        if verbose:
+            console.print(
+                f"    [dim]Gap report: {len(gap_report.gaps)} gaps, "
+                f"{gap_report.feasible_gaps} feasible, "
+                f"coverage {gap_report.coverage_pct:.1f}%[/dim]"
+            )
+            for gap in gap_report.gaps:
+                feasible_tag = "" if gap.feasible else " [infeasible]"
+                console.print(f"      [dim]{gap.kind.value}: {gap.dart_name}{feasible_tag}[/dim]")
 
         if gap_report.feasible_gaps == 0:
             return RefinementResult(
@@ -122,6 +137,12 @@ class AIRefiner:
 
         architect_result = await architect_agent.run(architect_prompt, deps=architect_deps)
         architect_plan = architect_result.output
+
+        if verbose:
+            n = len(architect_plan.suggestions)
+            console.print(f"    [dim]Architect: {n} suggestion(s)[/dim]")
+            for s in architect_plan.suggestions:
+                console.print(f"      [dim][P{s.priority}] {s.target_file}: {s.description}[/dim]")
 
         if not architect_plan.suggestions:
             return RefinementResult(
@@ -164,12 +185,25 @@ class AIRefiner:
             total_applied += applied
             total_failed += failed
 
+            if verbose:
+                console.print(
+                    f"    [dim]Editor attempt {attempt + 1}: "
+                    f"{applied} applied, {failed} failed[/dim]"
+                )
+
             # Validate
             errors = validate_python_syntax(modified_files)
             if not errors:
                 current_files = modified_files
                 validation_passed = True
+                if verbose:
+                    console.print("    [dim]Validation: passed[/dim]")
                 break
+
+            if verbose:
+                console.print(f"    [dim]Validation: {len(errors)} error(s)[/dim]")
+                for err in errors[:5]:
+                    console.print(f"      [dim]{err}[/dim]")
 
             # Feed errors back for retry
             editor_deps.feedback = "Validation errors:\n" + "\n".join(errors)

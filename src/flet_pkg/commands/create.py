@@ -116,6 +116,14 @@ def create(
         ),
         rich_help_panel="AI Refinement",
     ),
+    # -- Output options --
+    verbose: bool = typer.Option(
+        False,
+        "--verbose",
+        "-v",
+        help="Show detailed analysis output and coverage breakdown table.",
+        rich_help_panel="Output",
+    ),
 ) -> None:
     """[bold]Create a new Flet extension package.[/bold]
 
@@ -268,6 +276,7 @@ def create(
                 ai_refine=ai_refine,
                 ai_provider=ai_provider,
                 ai_model=ai_model,
+                verbose=verbose,
             )
 
             if result.warnings:
@@ -279,6 +288,18 @@ def create(
                     f"\n[success]Auto-generated {len(result.files_generated)} files "
                     f"from {flutter_package} analysis.[/success]"
                 )
+
+            # Coverage score (always shown when available)
+            if result.gap_report is not None:
+                from flet_pkg.ui.coverage import print_coverage_score, print_coverage_table
+
+                print_coverage_score(
+                    result.coverage_pct,
+                    result.gap_report.total_generated,
+                    result.gap_report.total_dart_api,
+                )
+                if verbose:
+                    print_coverage_table(result.gap_report)
         except Exception as e:
             console.print(f"  [warning]Analysis skipped: {e}[/warning]")
 

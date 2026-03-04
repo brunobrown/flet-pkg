@@ -49,6 +49,8 @@ class GapReport:
     total_generated: int = 0
     coverage_pct: float = 0.0
     gaps: list[GapItem] = field(default_factory=list)
+    category_counts: dict[str, tuple[int, int]] = field(default_factory=dict)
+    """Per-category (dart_api_count, generated_count) — e.g. {"Methods": (25, 24)}."""
 
     @property
     def feasible_gaps(self) -> int:

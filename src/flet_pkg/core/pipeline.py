@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from flet_pkg.core.analyzer import PackageAnalyzer
 from flet_pkg.core.downloader import PubDevDownloader
@@ -18,9 +19,12 @@ from flet_pkg.core.generators import (
     PythonSubModuleGenerator,
     PythonTypesGenerator,
 )
-from flet_pkg.core.models import GenerationPlan
+from flet_pkg.core.models import DartPackageAPI, GenerationPlan
 from flet_pkg.core.parser import parse_dart_package_api
 from flet_pkg.ui.console import console
+
+if TYPE_CHECKING:
+    from flet_pkg.core.ai.models import GapReport
 
 
 @dataclass
@@ -31,6 +35,8 @@ class PipelineResult:
     plan: GenerationPlan
     files_generated: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    coverage_pct: float = 0.0
+    gap_report: GapReport | None = None
 
 
 class GenerationPipeline:
@@ -62,6 +68,7 @@ class GenerationPipeline:
         ai_refine: bool = False,
         ai_provider: str | None = None,
         ai_model: str | None = None,
+        verbose: bool = False,
     ) -> PipelineResult:
         """Run the full generation pipeline.
 
@@ -78,6 +85,7 @@ class GenerationPipeline:
             ai_refine: If True, run AI refinement after generation.
             ai_provider: AI provider name (anthropic, openai, google, ollama).
             ai_model: AI model name override.
+            verbose: If True, print detailed progress at each step.
 
         Returns:
             PipelineResult with generated file list and warnings.
@@ -117,6 +125,11 @@ class GenerationPipeline:
             if n_funcs:
                 parts.append(f"{n_funcs} top-level functions")
             console.print(f"  [success]Parsed {', '.join(parts)}[/success]")
+            if verbose:
+                for cls in api.classes:
+                    console.print(f"    [dim]class {cls.name}[/dim]")
+                for enum in api.enums:
+                    console.print(f"    [dim]enum {enum.name}[/dim]")
         except Exception as e:
             result.warnings.append(f"Parse failed: {e}")
             console.print(f"  [warning]Parse failed: {e}[/warning]")
@@ -165,6 +178,17 @@ class GenerationPipeline:
             if plan.sibling_widgets:
                 sib_names = ", ".join(s.control_name for s in plan.sibling_widgets)
                 console.print(f"  [success]Sibling widgets: {sib_names}[/success]")
+            if verbose:
+                for m in plan.main_methods:
+                    console.print(f"    [dim]method: {m.python_name}()[/dim]")
+                for sub in plan.sub_modules:
+                    console.print(f"    [dim]sub-module: {sub.module_name}[/dim]")
+                    for m in sub.methods:
+                        console.print(f"      [dim]{m.python_name}()[/dim]")
+                for ev in plan.events:
+                    console.print(f"    [dim]event: {ev.python_attr_name}[/dim]")
+                for p in getattr(plan, "properties", []):
+                    console.print(f"    [dim]property: {p.python_name}[/dim]")
         except Exception as e:
             result.warnings.append(f"Analysis failed: {e}")
             console.print(f"  [warning]Analysis failed: {e}[/warning]")
@@ -187,6 +211,23 @@ class GenerationPipeline:
             except Exception as e:
                 result.warnings.append(f"Generator {gen.__class__.__name__} failed: {e}")
 
+        if verbose:
+            py_files = [f for f in all_files if f.endswith(".py")]
+            dart_files = [f for f in all_files if f.endswith(".dart")]
+            console.print(
+                f"    [dim]{len(py_files)} Python files, {len(dart_files)} Dart files[/dim]"
+            )
+            for fname in sorted(all_files):
+                console.print(f"    [dim]{fname}[/dim]")
+
+        # Step 4.1: Gap Analysis (deterministic — no AI)
+        try:
+            gap_report = self._run_gap_analysis(api, plan, extension_type)
+            result.coverage_pct = gap_report.coverage_pct
+            result.gap_report = gap_report
+        except Exception as e:
+            result.warnings.append(f"Gap analysis failed: {e}")
+
         # Step 4.5: AI Refinement (optional)
         if ai_refine:
             try:
@@ -197,7 +238,14 @@ class GenerationPipeline:
                 if config.is_available():
                     console.print("  [info]Running AI refinement...[/info]")
                     refiner = AIRefiner(config)
-                    ai_result = refiner.refine(api, plan, all_files, extension_type, package_path)
+                    ai_result = refiner.refine(
+                        api,
+                        plan,
+                        all_files,
+                        extension_type,
+                        package_path,
+                        verbose=verbose,
+                    )
                     if ai_result.edits_applied > 0:
                         console.print(
                             f"  [success]AI refined: {ai_result.edits_applied} edits applied"
@@ -240,6 +288,18 @@ class GenerationPipeline:
         console.print(f"  [success]Generated {len(result.files_generated)} files[/success]")
 
         return result
+
+    @staticmethod
+    def _run_gap_analysis(
+        api: DartPackageAPI,
+        plan: GenerationPlan,
+        extension_type: str,
+    ) -> GapReport:
+        """Run deterministic gap analysis (no AI/LLM)."""
+        from flet_pkg.core.ai.gap_analyzer import GapAnalyzer
+
+        analyzer = GapAnalyzer()
+        return analyzer.analyze(api, plan, extension_type)
 
     def _cleanup_stubs(
         self,

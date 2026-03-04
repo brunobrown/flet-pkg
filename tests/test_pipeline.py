@@ -1,9 +1,13 @@
+from io import StringIO
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+from rich.console import Console
 
+from flet_pkg.core.ai.models import GapReport
 from flet_pkg.core.pipeline import GenerationPipeline, PipelineResult
+from flet_pkg.ui.coverage import print_coverage_score, print_coverage_table
 
 FIXTURE_PATH = Path(__file__).parent / "fixtures" / "onesignal_flutter"
 
@@ -149,3 +153,130 @@ class TestPipelineErrors:
 
         assert len(result.warnings) > 0
         assert result.files_generated == []
+
+
+class TestPipelineCoverage:
+    """Tests for coverage score and gap report in pipeline results."""
+
+    def test_pipeline_result_has_coverage(self, pipeline, tmp_path):
+        """Coverage percentage and gap_report should be populated after a run."""
+        project_dir = _setup_project(tmp_path)
+
+        result = pipeline.run(
+            flutter_package="onesignal_flutter",
+            control_name="OneSignal",
+            extension_type="service",
+            project_dir=project_dir,
+            package_name="flet_onesignal",
+            local_package=FIXTURE_PATH,
+        )
+
+        assert result.coverage_pct > 0
+        assert result.gap_report is not None
+        assert result.gap_report.total_dart_api > 0
+        assert result.gap_report.total_generated > 0
+
+    def test_pipeline_verbose_runs_without_error(self, pipeline, tmp_path):
+        """Pipeline with verbose=True should complete without exceptions."""
+        project_dir = _setup_project(tmp_path)
+
+        result = pipeline.run(
+            flutter_package="onesignal_flutter",
+            control_name="OneSignal",
+            extension_type="service",
+            project_dir=project_dir,
+            package_name="flet_onesignal",
+            local_package=FIXTURE_PATH,
+            verbose=True,
+        )
+
+        assert len(result.files_generated) > 0
+        assert result.coverage_pct > 0
+
+    def test_gap_report_has_category_counts(self, pipeline, tmp_path):
+        """Gap report should have per-category counts populated."""
+        project_dir = _setup_project(tmp_path)
+
+        result = pipeline.run(
+            flutter_package="onesignal_flutter",
+            control_name="OneSignal",
+            extension_type="service",
+            project_dir=project_dir,
+            package_name="flet_onesignal",
+            local_package=FIXTURE_PATH,
+        )
+
+        assert result.gap_report is not None
+        assert len(result.gap_report.category_counts) > 0
+        # At least Methods should be present for a service package
+        assert "Methods" in result.gap_report.category_counts
+
+
+class TestCoverageDisplay:
+    """Tests for the coverage UI functions."""
+
+    def test_print_coverage_score_format(self):
+        """Coverage score line should include percentage and fraction."""
+        buf = StringIO()
+        test_console = Console(file=buf, force_terminal=False, width=80)
+
+        with patch("flet_pkg.ui.coverage.console", test_console):
+            print_coverage_score(95.2, 40, 42)
+
+        output = buf.getvalue()
+        assert "95.2%" in output
+        assert "40/42" in output
+
+    def test_print_coverage_score_na_when_zero(self):
+        """Score should show N/A when there are no Dart APIs."""
+        buf = StringIO()
+        test_console = Console(file=buf, force_terminal=False, width=80)
+
+        with patch("flet_pkg.ui.coverage.console", test_console):
+            print_coverage_score(0.0, 0, 0)
+
+        output = buf.getvalue()
+        assert "N/A" in output
+
+    def test_print_coverage_table_renders(self):
+        """Coverage table should render categories and totals."""
+        report = GapReport(
+            flutter_package="test_pkg",
+            extension_type="service",
+            total_dart_api=30,
+            total_generated=27,
+            coverage_pct=90.0,
+            category_counts={
+                "Methods": (20, 18),
+                "Events": (5, 5),
+                "Enums": (5, 4),
+            },
+        )
+
+        buf = StringIO()
+        test_console = Console(file=buf, force_terminal=False, width=100)
+
+        with patch("flet_pkg.ui.coverage.console", test_console):
+            print_coverage_table(report)
+
+        output = buf.getvalue()
+        assert "Methods" in output
+        assert "Events" in output
+        assert "Enums" in output
+        assert "Total" in output
+
+    def test_print_coverage_table_empty_report(self):
+        """Table should not render when category_counts is empty."""
+        report = GapReport(
+            flutter_package="test_pkg",
+            extension_type="service",
+        )
+
+        buf = StringIO()
+        test_console = Console(file=buf, force_terminal=False, width=80)
+
+        with patch("flet_pkg.ui.coverage.console", test_console):
+            print_coverage_table(report)
+
+        output = buf.getvalue()
+        assert output.strip() == ""

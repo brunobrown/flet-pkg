@@ -45,6 +45,8 @@
     - [Package Options](#package-options)
     - [Code Generation Options](#code-generation-options)
     - [AI Refinement Options](#ai-refinement-options)
+    - [Output Options](#output-options)
+- [Verbose Mode & Coverage Score](#verbose-mode--coverage-score)
 - [AI Refinement](#ai-refinement)
   - [Free (Ollama - Local)](#free-ollama---local)
   - [Cloud Providers](#cloud-providers)
@@ -62,6 +64,16 @@
 - [Development](#development)
 - [Support](#support)
 - [License](#license)
+
+---
+
+## Buy Me a Coffee
+
+If you find this project useful, please consider supporting its development:
+
+<a href="https://www.buymeacoffee.com/brunobrown">
+<img src="https://www.buymeacoffee.com/assets/img/guidelines/download-assets-sm-1.svg" width="200" alt="Buy Me a Coffee">
+</a>
 
 ---
 
@@ -113,6 +125,9 @@ flet-pkg create -t ui_control -f shimmer
 
 # Auto-detect type + AI refinement (free, uses Ollama locally)
 flet-pkg create -f onesignal_flutter --ai-refine
+
+# Verbose mode — detailed output + coverage breakdown table
+flet-pkg create -t service -f shared_preferences -v
 ```
 
 ---
@@ -206,8 +221,8 @@ This skips the pub.dev download and uses your local files directly.
 Usage: flet-pkg [OPTIONS] COMMAND [ARGS]...
 
 Options:
-  -v, --version    Show version and exit.
-  --help           Show this message and exit.
+  --version    Show version and exit.
+  --help       Show this message and exit.
 
 Commands:
   create    Create a new Flet extension package.
@@ -242,6 +257,58 @@ Usage: flet-pkg create [OPTIONS]
 | `--ai-refine / --no-ai-refine` | BOOL | _(prompted)_ | Run AI-powered refinement on generated code. Requires `uv add flet-pkg[ai]` or `pip install flet-pkg[ai]`. |
 | `--ai-provider` | TEXT | `ollama` | AI provider: `ollama` (local, free), `anthropic` (Claude), `openai` (GPT), or `google` (Gemini). |
 | `--ai-model` | TEXT | _(per provider)_ | Override the default model. Defaults: `ollama`=`qwen2.5-coder`, `anthropic`=`claude-sonnet-4-6`, `openai`=`gpt-4.1-mini`, `google`=`gemini-2.5-flash`. |
+
+#### Output Options
+
+| Option | Short | Type | Default | Description |
+|--------|-------|------|---------|-------------|
+| `--verbose` | `-v` | BOOL | `False` | Show detailed analysis output and coverage breakdown table. Without this flag, only a one-line coverage score is shown. |
+
+---
+
+## Verbose Mode & Coverage Score
+
+After code generation, flet-pkg runs a **deterministic gap analysis** that compares the Dart API against the generated Python code. A **coverage score** is always displayed:
+
+```
+  Coverage: 95.4% (41/43 features mapped)
+```
+
+### Verbose Mode (`-v`)
+
+Pass `--verbose` or `-v` to see detailed output at every pipeline step:
+
+```bash
+# Score only (default)
+flet-pkg create -t service -f shared_preferences --no-ai-refine
+
+# Full verbose output with breakdown table
+flet-pkg create -t service -f shared_preferences --no-ai-refine -v
+
+# Verbose + AI refinement details
+flet-pkg create -t service -f shared_preferences --ai-refine -v
+```
+
+In verbose mode you'll see:
+
+- **Parse details** — every class and enum discovered in the Dart source
+- **Analyze details** — each method, sub-module, event, and property mapped
+- **Generate details** — file breakdown (Python vs Dart) with filenames
+- **AI details** _(when `--ai-refine`)_ — gap report, architect suggestions, editor edits, validation results
+- **Coverage breakdown table** — per-category Rich table:
+
+```
+            Coverage Breakdown
+┌────────────────┬──────────┬─────────┬─────────────────┐
+│ Category       │ Dart API │  Mapped │ Coverage        │
+├────────────────┼──────────┼─────────┼─────────────────┤
+│ Methods        │       25 │      24 │ ████████░░ 96%  │
+│ Events         │        5 │       5 │ ██████████ 100% │
+│ Enums          │        8 │       7 │ ███████░░░ 88%  │
+├────────────────┼──────────┼─────────┼─────────────────┤
+│ Total          │       38 │      36 │ █████████░ 95%  │
+└────────────────┴──────────┴─────────┴─────────────────┘
+```
 
 ---
 
@@ -511,6 +578,12 @@ flet-pkg create -t ui_control -f shimmer --ai-refine
 flet-pkg create -t service -f my_package -l ./my_flutter_package
 ```
 
+### Verbose output with coverage breakdown
+
+```bash
+flet-pkg create -t service -f battery_plus -v
+```
+
 ### Non-interactive mode for CI
 
 ```bash
@@ -546,24 +619,28 @@ uv run flet-pkg create
 
 ---
 
-## Support
+## 🌐 Community
 
-- **Documentation:** https://brunobrown.github.io/flet-pkg
-- **Issues:** https://github.com/brunobrown/flet-pkg/issues
+Join the community to contribute or get help:
 
-### Buy Me a Coffee
+- [Discord](https://discord.gg/dzWXP8SHG8)
+- [GitHub Issues](https://github.com/brunobrown/flet-pkg/issues)
 
-If you find this project useful, please consider supporting its development:
+## ⭐ Support
 
-<a href="https://www.buymeacoffee.com/brunobrown">
-<img src="https://www.buymeacoffee.com/assets/img/guidelines/download-assets-sm-1.svg" width="200" alt="Buy Me a Coffee">
-</a>
+If you like this project, please give it a [GitHub star](https://github.com/brunobrown/flet-pkg) ⭐
 
 ---
 
-## License
+## 🤝 Contributing
 
-MIT
+Contributions and feedback are welcome!
+
+1. Fork the repository
+2. Create a feature branch
+3. Submit a pull request with detailed explanation
+
+For feedback, [open an issue](https://github.com/brunobrown/flet-pkg/issues) with your suggestions.
 
 ---
 

@@ -113,6 +113,13 @@ class GapAnalyzer:
             extension_type="service",
         )
 
+        # Per-category counters: [dart_api, generated]
+        cat: dict[str, list[int]] = {
+            "Methods": [0, 0],
+            "Events": [0, 0],
+            "Enums": [0, 0],
+        }
+
         # Collect all generated method names (main + sub-modules)
         generated_methods: set[str] = set()
         for m in plan.main_methods:
@@ -140,6 +147,7 @@ class GapAnalyzer:
                 # Stream getters → events
                 if method.is_getter and method.return_type.startswith("Stream"):
                     report.total_dart_api += 1
+                    cat["Events"][0] += 1
                     event_name = f"on_{camel_to_snake(method.name)}"
                     if not any(
                         e.python_attr_name == event_name
@@ -158,13 +166,16 @@ class GapAnalyzer:
                         )
                     else:
                         report.total_generated += 1
+                        cat["Events"][1] += 1
                     continue
 
                 # Regular methods
                 report.total_dart_api += 1
+                cat["Methods"][0] += 1
                 python_name = camel_to_snake(method.name)
                 if python_name in generated_methods:
                     report.total_generated += 1
+                    cat["Methods"][1] += 1
                 else:
                     report.gaps.append(
                         GapItem(
@@ -180,9 +191,11 @@ class GapAnalyzer:
         # Top-level functions
         for func in api.top_level_functions:
             report.total_dart_api += 1
+            cat["Methods"][0] += 1
             python_name = camel_to_snake(func.name)
             if python_name in generated_methods:
                 report.total_generated += 1
+                cat["Methods"][1] += 1
             else:
                 report.gaps.append(
                     GapItem(
@@ -197,10 +210,12 @@ class GapAnalyzer:
         # Enum gaps
         for dart_enum in api.enums:
             report.total_dart_api += 1
+            cat["Enums"][0] += 1
             if dart_enum.name in generated_enums or any(
                 e.python_name == dart_enum.name for e in plan.enums
             ):
                 report.total_generated += 1
+                cat["Enums"][1] += 1
             else:
                 report.gaps.append(
                     GapItem(
@@ -214,6 +229,9 @@ class GapAnalyzer:
         if report.total_dart_api > 0:
             report.coverage_pct = report.total_generated / report.total_dart_api * 100
 
+        # Store per-category counts (only non-empty categories)
+        report.category_counts = {k: (v[0], v[1]) for k, v in cat.items() if v[0] > 0}
+
         return report
 
     def _analyze_ui_control_gaps(
@@ -226,6 +244,13 @@ class GapAnalyzer:
             flutter_package=plan.flutter_package,
             extension_type="ui_control",
         )
+
+        # Per-category counters: [dart_api, generated]
+        cat: dict[str, list[int]] = {
+            "Properties": [0, 0],
+            "Events": [0, 0],
+            "Enums": [0, 0],
+        }
 
         # Find the main widget class
         widget_classes = [c for c in api.classes if c.constructor_params]
@@ -261,9 +286,11 @@ class GapAnalyzer:
             is_callback = self._is_callback_type(param.dart_type)
 
             if is_callback:
+                cat["Events"][0] += 1
                 event_name = f"on_{python_name.removeprefix('on_')}"
                 if event_name in generated_events or python_name in generated_events:
                     report.total_generated += 1
+                    cat["Events"][1] += 1
                 else:
                     report.gaps.append(
                         GapItem(
@@ -275,8 +302,11 @@ class GapAnalyzer:
                         )
                     )
             elif python_name in generated_props or python_name in sub_control_props:
+                cat["Properties"][0] += 1
                 report.total_generated += 1
+                cat["Properties"][1] += 1
             else:
+                cat["Properties"][0] += 1
                 feasible = self._is_property_feasible(param.dart_type)
                 report.gaps.append(
                     GapItem(
@@ -292,10 +322,12 @@ class GapAnalyzer:
         # Enum gaps
         for dart_enum in api.enums:
             report.total_dart_api += 1
+            cat["Enums"][0] += 1
             if dart_enum.name in generated_enums or any(
                 e.python_name == dart_enum.name for e in plan.enums
             ):
                 report.total_generated += 1
+                cat["Enums"][1] += 1
             else:
                 report.gaps.append(
                     GapItem(
@@ -308,6 +340,9 @@ class GapAnalyzer:
         # Coverage
         if report.total_dart_api > 0:
             report.coverage_pct = report.total_generated / report.total_dart_api * 100
+
+        # Store per-category counts (only non-empty categories)
+        report.category_counts = {k: (v[0], v[1]) for k, v in cat.items() if v[0] > 0}
 
         return report
 
