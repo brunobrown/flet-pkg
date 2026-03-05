@@ -4,8 +4,8 @@
 
 ![Python](https://img.shields.io/badge/python-3.10+-3776AB?logo=python&logoColor=white)
 ![Flet](https://img.shields.io/badge/flet-0.80.0+-00B4D8?logo=flet)
-![CI-MAIN](https://img.shields.io/badge/main-passing-brightgreen)
-![CI-DEV](https://img.shields.io/badge/dev-passing-brightgreen)
+[![Main](https://github.com/brunobrown/flet-pkg/actions/workflows/main.yml/badge.svg?branch=main)](https://github.com/brunobrown/flet-pkg/actions/workflows/main.yml)
+[![Dev](https://github.com/brunobrown/flet-pkg/actions/workflows/dev.yml/badge.svg?branch=dev)](https://github.com/brunobrown/flet-pkg/actions/workflows/dev.yml)
 ![Docs](https://img.shields.io/badge/https%3A%2F%2Fimg.shields.io%2Fbadge%2Fdocs-mkdocs-blue?label=docs)
 ![Coverage](https://img.shields.io/badge/coverage-95%25-orange)
 ![License](https://img.shields.io/badge/license-MIT-yellow)
