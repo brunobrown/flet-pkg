@@ -658,7 +658,7 @@ uv run flet-pkg create
 * [Roadmap](https://flet.dev/roadmap)
 * [Apps Gallery](https://flet.dev/gallery)
 
-## 🌐 Community
+## 🌐 Flet Community
 
 Join the community to contribute or get help:
 
@@ -685,6 +685,7 @@ Contributions and feedback are welcome!
 For feedback, [open an issue](https://github.com/brunobrown/flet-pkg/issues) with your suggestions.
 
 ---
+## Try flet-pkg today and turn any Flutter package into a Flet extension in seconds!
 
 <p align="center"><img src="https://github.com/user-attachments/assets/431aa05f-5fbc-4daa-9689-b9723583e25a" width="50%"></p>
 <p align="center"><a href="https://www.bible.com/bible/116/PRO.16.NLT"> Commit your work to the LORD, and your plans will succeed. Proverbs 16:3</a></p>
