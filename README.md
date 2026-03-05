@@ -4,12 +4,13 @@
   <strong>CLI tool that scaffolds Flet extension packages from Flutter packages, with auto-generated Python controls, Dart bridge code, type mappings, and event handlers.</strong>
 </p>
 
-![Python](https://img.shields.io/badge/Python-3.10+-3776AB?style=for-the-badge&logo=python&logoColor=white)
-![Flet](https://img.shields.io/badge/Flet-0.80.0+-00B4D8?style=for-the-badge&logo=flutter&logoColor=white)
-![CI-MAIN](https://img.shields.io/badge/ci|main-passing-brightgreen?style=for-the-badge)
-![CI-DEV](https://img.shields.io/badge/ci|dev-passing-brightgreen?style=for-the-badge)
-![Docs](https://img.shields.io/badge/https%3A%2F%2Fimg.shields.io%2Fbadge%2Fdocs-mkdocs-blue?style=for-the-badge&label=Docs)
-![License](https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge)
+![Python](https://img.shields.io/badge/python-3.10+-3776AB?logo=python&logoColor=white)
+![Flet](https://img.shields.io/badge/flet-0.80.0+-00B4D8?logo=flet)
+![CI-MAIN](https://img.shields.io/badge/main-passing-brightgreen)
+![CI-DEV](https://img.shields.io/badge/dev-passing-brightgreen)
+![Docs](https://img.shields.io/badge/https%3A%2F%2Fimg.shields.io%2Fbadge%2Fdocs-mkdocs-blue?label=docs)
+![Coverage](https://img.shields.io/badge/coverage-95%25-orange)
+![License](https://img.shields.io/badge/license-MIT-yellow)
 
 ---
 
@@ -650,12 +651,22 @@ uv run flet-pkg create
 
 ---
 
+## Learn more
+
+* [Website](https://flet.dev)
+* [Documentation](https://brunobrown.github.io/flet-pkg)
+* [Roadmap](https://flet.dev/roadmap)
+* [Apps Gallery](https://flet.dev/gallery)
+
 ## 🌐 Community
 
 Join the community to contribute or get help:
 
-- [Discord](https://discord.gg/dzWXP8SHG8)
-- [GitHub Issues](https://github.com/brunobrown/flet-pkg/issues)
+* [Discussions](https://github.com/flet-dev/flet/discussions)
+* [Discord](https://discord.gg/dzWXP8SHG8)
+* [X (Twitter)](https://twitter.com/fletdev)
+* [Bluesky](https://bsky.app/profile/fletdev.bsky.social)
+* [Email us](mailto:hello@flet.dev)
 
 ## ⭐ Support
 
