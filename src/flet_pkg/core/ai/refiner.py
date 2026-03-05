@@ -46,10 +46,16 @@ class AIRefiner:
     """
 
     def __init__(self, config: AIConfig):
+        """Initialise the refiner with an AI configuration.
+
+        Args:
+            config: Provider and model settings for the LLM.
+        """
         self.config = config
         self._model: Any = None
 
     def _get_model(self) -> Any:
+        """Lazily create and return the pydantic-ai model instance."""
         if self._model is None:
             self._model = create_model(self.config)
         return self._model

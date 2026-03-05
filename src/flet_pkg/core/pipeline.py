@@ -53,6 +53,7 @@ class GenerationPipeline:
     """
 
     def __init__(self):
+        """Initialise pipeline with default downloader and analyzer."""
         self.downloader = PubDevDownloader()
         self.analyzer = PackageAnalyzer()
 

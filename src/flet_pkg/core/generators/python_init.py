@@ -15,6 +15,14 @@ class PythonInitGenerator(CodeGenerator):
     """Generates __init__.py with exports and __all__."""
 
     def generate(self, plan: GenerationPlan) -> dict[str, str]:
+        """Generate ``__init__.py`` with public exports and ``__all__``.
+
+        Args:
+            plan: Generation plan produced by the analyzer.
+
+        Returns:
+            Mapping of filename to generated source code.
+        """
         lines: list[str] = []
         all_exports: list[str] = []
 

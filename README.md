@@ -13,7 +13,7 @@
 
 ---
 
-> **Important: this tool does not do magic.** 🧙🏽‍♂️🧙🏻‍♀️😂
+> **Important: this tool does not perform miracles.** 🙏😂
 >
 > Every Flutter package on [pub.dev](https://pub.dev) has its own API surface, configuration requirements, and platform-specific behaviors. Some packages expose simple method calls; others require complex initialization flows, native platform setup (Android manifests, iOS plists, Gradle/CocoaPods configuration), or callback-based architectures that don't map cleanly to Python.
 >
@@ -465,6 +465,20 @@ Or use `uvx` (no install needed):
 | `scaffold_service` | Step-by-step guide to scaffold a service extension |
 | `scaffold_ui_control` | Step-by-step guide to scaffold a UI control extension |
 | `analyze_package` | Guide to analyze coverage without scaffolding |
+
+### Example Prompts
+
+With the MCP server configured, use natural language in Claude Code or Claude Desktop:
+
+```
+> Use the flet-pkg tool to analyze the Flutter package "onesignal_flutter" and tell me
+  the extension type and coverage.
+```
+
+```
+> Use the flet-pkg tool to analyze the Flutter package "rive" and tell me the extension
+  type and coverage.
+```
 
 ---
 

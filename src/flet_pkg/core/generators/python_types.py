@@ -22,6 +22,14 @@ class PythonTypesGenerator(CodeGenerator):
         return f"Optional[{field_type}]"
 
     def generate(self, plan: GenerationPlan) -> dict[str, str]:
+        """Generate ``types.py`` with enums, event dataclasses, and sub-control classes.
+
+        Args:
+            plan: Generation plan produced by the analyzer.
+
+        Returns:
+            Mapping of filename to generated source code.
+        """
         # Always generate types.py — the error event class is always
         # imported by the main control file.
 

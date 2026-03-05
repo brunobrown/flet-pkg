@@ -242,5 +242,3 @@ pyrightconfig.json
 tmp
 
 .github/workflows
-
-investigate_coverage.py

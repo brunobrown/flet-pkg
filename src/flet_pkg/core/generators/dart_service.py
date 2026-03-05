@@ -21,6 +21,14 @@ class DartServiceGenerator(CodeGenerator):
     """Generates the Dart FletService/FletWidget file."""
 
     def generate(self, plan: GenerationPlan) -> dict[str, str]:
+        """Generate Dart service/widget files and optional extension.dart.
+
+        Args:
+            plan: Generation plan produced by the analyzer.
+
+        Returns:
+            Mapping of filename to generated Dart source code.
+        """
         control_snake = plan.control_name_snake or camel_to_snake(plan.control_name)
         service_type = "Service" if plan.base_class == "ft.Service" else "Widget"
         filename = f"{control_snake}_{service_type.lower()}.dart"

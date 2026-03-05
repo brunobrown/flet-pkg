@@ -224,6 +224,7 @@ def analyzer():
 # -- Tests --------------------------------------------------------------------
 
 
+@pytest.mark.network
 @pytest.mark.parametrize(
     "pkg",
     SERVICE_PACKAGES,

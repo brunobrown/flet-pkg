@@ -1,3 +1,8 @@
+"""Typer CLI application for flet-pkg.
+
+Registers the ``create`` command and provides a ``--version`` callback.
+"""
+
 import typer
 
 from flet_pkg import __app_name__, __version__
@@ -41,6 +46,7 @@ app.command()(create)
 
 
 def _version_callback(value: bool) -> None:
+    """Print the version string and exit when ``--version`` is passed."""
     if value:
         typer.echo(f"{__app_name__} {__version__}")
         raise typer.Exit()
@@ -56,4 +62,5 @@ def main(
         is_eager=True,
     ),
 ) -> None:
+    """Root callback invoked before any sub-command."""
     pass

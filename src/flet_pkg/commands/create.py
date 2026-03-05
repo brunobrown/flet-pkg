@@ -1,3 +1,10 @@
+"""Create command for flet-pkg.
+
+Orchestrates the full extension creation flow: type detection, name
+derivation, registry checking, scaffolding, pipeline analysis, and
+optional AI refinement.
+"""
+
 from pathlib import Path
 from typing import Optional
 

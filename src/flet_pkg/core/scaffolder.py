@@ -1,3 +1,10 @@
+"""Jinja2-based project scaffolder.
+
+Walks a template directory tree, resolves ``{{variable}}`` placeholders
+in file and directory names, and renders ``.jinja`` files through
+Jinja2 to produce a complete project skeleton.
+"""
+
 import os
 import re
 import shutil
@@ -13,7 +20,26 @@ VARIABLE_RE = re.compile(r"\{\{(\w+)\}\}")
 
 
 class Scaffolder:
+    """Render a project from a template directory.
+
+    Attributes:
+        template_path: Resolved path to the template directory.
+        context: Variable mapping used for name resolution and rendering.
+        output_dir: Root directory where the project will be created.
+        env: Jinja2 environment configured with strict undefined.
+    """
+
     def __init__(self, template_name: str, context: dict, output_dir: Path | None = None):
+        """Initialise the scaffolder.
+
+        Args:
+            template_name: Name of the template (``service`` or ``ui_control``).
+            context: Dictionary of variables for Jinja2 rendering.
+            output_dir: Target directory. Defaults to the current working directory.
+
+        Raises:
+            FileNotFoundError: If the template directory does not exist.
+        """
         self.template_path = TEMPLATE_DIR / template_name
         if not self.template_path.is_dir():
             raise FileNotFoundError(f"Template '{template_name}' not found at {self.template_path}")
@@ -28,9 +54,18 @@ class Scaffolder:
         )
 
     def _resolve_name(self, name: str) -> str:
+        """Replace ``{{variable}}`` placeholders in *name* using the context."""
         return VARIABLE_RE.sub(lambda m: str(self.context.get(m.group(1), m.group(0))), name)
 
     def generate(self) -> Path:
+        """Generate the project directory from the template.
+
+        Returns:
+            Path to the created project directory.
+
+        Raises:
+            FileExistsError: If the project directory already exists.
+        """
         project_name = self.context.get("project_name", "output")
         project_dir = self.output_dir / project_name
         if project_dir.exists():
@@ -42,6 +77,7 @@ class Scaffolder:
         return project_dir
 
     def _walk_and_render(self, project_dir: Path) -> None:
+        """Recursively walk the template tree and render files into *project_dir*."""
         for dirpath, dirnames, filenames in os.walk(self.template_path):
             rel_dir = Path(dirpath).relative_to(self.template_path)
             resolved_dir = (

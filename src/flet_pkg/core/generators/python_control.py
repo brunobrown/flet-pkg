@@ -16,6 +16,14 @@ class PythonControlGenerator(CodeGenerator):
     """Generates the main Python control file."""
 
     def generate(self, plan: GenerationPlan) -> dict[str, str]:
+        """Generate the main Python control file.
+
+        Args:
+            plan: Generation plan produced by the analyzer.
+
+        Returns:
+            Mapping of filename to generated source code.
+        """
         control_snake = plan.control_name_snake or camel_to_snake(plan.control_name)
         filename = f"{control_snake}.py"
         lines: list[str] = []

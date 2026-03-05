@@ -15,6 +15,14 @@ class PythonSubModuleGenerator(CodeGenerator):
     """Generates Python sub-module files."""
 
     def generate(self, plan: GenerationPlan) -> dict[str, str]:
+        """Generate one Python file per sub-module.
+
+        Args:
+            plan: Generation plan produced by the analyzer.
+
+        Returns:
+            Mapping of filename to generated source code.
+        """
         files: dict[str, str] = {}
         for sub in plan.sub_modules:
             filename = f"{sub.module_name}.py"
@@ -23,6 +31,7 @@ class PythonSubModuleGenerator(CodeGenerator):
         return files
 
     def _render_submodule(self, sub: SubModulePlan, plan: GenerationPlan) -> str:
+        """Render a single sub-module file."""
         lines: list[str] = []
         control_snake = plan.control_name_snake or camel_to_snake(plan.control_name)
         self._enum_names = {e.python_name for e in plan.enums}
@@ -95,6 +104,7 @@ class PythonSubModuleGenerator(CodeGenerator):
         return "\n".join(lines)
 
     def _render_method(self, method: MethodPlan, sub: SubModulePlan) -> list[str]:
+        """Render a single method definition for a sub-module class."""
         lines: list[str] = []
 
         # Build signature

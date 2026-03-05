@@ -37,6 +37,7 @@ class AppContext:
 
 @asynccontextmanager
 async def app_lifespan(server: FastMCP) -> AsyncIterator[AppContext]:
+    """Provide a shared ``PubDevDownloader`` instance for the server lifetime."""
     yield AppContext(downloader=PubDevDownloader())
 
 
@@ -55,6 +56,7 @@ ToolContext = Context[ServerSession, AppContext]
 
 
 def _get_downloader(ctx: ToolContext) -> PubDevDownloader:
+    """Extract the shared downloader from the MCP tool context."""
     return ctx.request_context.lifespan_context.downloader
 
 

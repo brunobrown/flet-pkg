@@ -80,6 +80,12 @@ class PackageAnalyzer:
     """
 
     def __init__(self, min_namespace_methods: int = 2):
+        """Initialise the analyzer.
+
+        Args:
+            min_namespace_methods: Minimum number of methods required to
+                justify extracting a separate sub-module.
+        """
         self.min_namespace_methods = min_namespace_methods
         self._known_types: frozenset[str] = frozenset()
 

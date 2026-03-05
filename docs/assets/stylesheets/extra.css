@@ -1,0 +1,23 @@
+/* flet-pkg brand: #DA8A17 */
+
+[data-md-color-scheme="default"] {
+  --md-primary-fg-color: #DA8A17;
+  --md-primary-fg-color--light: #E5A43E;
+  --md-primary-fg-color--dark: #B87212;
+  --md-accent-fg-color: #DA8A17;
+  --md-accent-fg-color--transparent: #DA8A171a;
+}
+
+[data-md-color-scheme="slate"] {
+  --md-primary-fg-color: #DA8A17;
+  --md-primary-fg-color--light: #E5A43E;
+  --md-primary-fg-color--dark: #B87212;
+  --md-accent-fg-color: #E5A43E;
+  --md-accent-fg-color--transparent: #E5A43E1a;
+}
+
+/* White logo in the header and mobile drawer to match the site name text */
+.md-header .md-header__button.md-logo img,
+.md-nav__title .md-nav__button.md-logo img {
+  filter: brightness(0) invert(1);
+}

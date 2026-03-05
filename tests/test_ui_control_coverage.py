@@ -289,6 +289,7 @@ def analyzer():
 # -- Tests ------------------------------------------------------------------
 
 
+@pytest.mark.network
 @pytest.mark.parametrize(
     "pkg",
     UI_CONTROL_PACKAGES,

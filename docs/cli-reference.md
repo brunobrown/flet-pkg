@@ -3,8 +3,9 @@
 ## Global options
 
 ```bash
-flet-pkg --version    # Show version and exit
-flet-pkg --help       # Show help
+flet-pkg --version      # Show version and exit
+flet-pkg --help         # Show help
+flet-pkg create --help  # Show help
 ```
 
 ## `flet-pkg create`
@@ -15,15 +16,44 @@ Create a new Flet extension package.
 flet-pkg create [OPTIONS]
 ```
 
-### Options
+### Package Options
 
 | Option | Short | Type | Default | Description |
 |--------|-------|------|---------|-------------|
 | `--type` | `-t` | `TEXT` | *(interactive)* | Extension type: `auto`, `service` or `ui_control` |
 | `--flutter-package` | `-f` | `TEXT` | *(interactive)* | Flutter package name from pub.dev |
 | `--output` | `-o` | `PATH` | Current dir | Output directory |
-| `--analyze/--no-analyze` | | `BOOL` | `True` | Analyze Flutter package and generate rich code |
 | `--local-package` | `-l` | `PATH` | | Path to a local Flutter package (skip download) |
+
+### Code Generation Options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `--analyze/--no-analyze` | `BOOL` | `True` | Analyze Flutter package and generate rich code |
+| `--console/--no-console` | `BOOL` | *(interactive)* | Include a debug console module for development logging |
+
+### AI Refinement Options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `--ai-refine/--no-ai-refine` | `BOOL` | *(interactive)* | Run AI-powered refinement on generated code |
+| `--ai-provider` | `TEXT` | `ollama` | AI provider: `ollama`, `anthropic`, `openai`, or `google` |
+| `--ai-model` | `TEXT` | *(auto)* | Override the default model for the selected provider |
+
+Default models per provider:
+
+| Provider | Default Model |
+|----------|--------------|
+| `ollama` | `qwen2.5-coder:14b` |
+| `anthropic` | `claude-sonnet-4-6` |
+| `openai` | `gpt-4.1-mini` |
+| `google` | `gemini-2.5-flash` |
+
+### Output Options
+
+| Option | Short | Type | Default | Description |
+|--------|-------|------|---------|-------------|
+| `--verbose` | `-v` | `BOOL` | `False` | Show detailed analysis output and coverage breakdown table |
 
 #### `--type` values
 
@@ -51,6 +81,8 @@ The interactive prompt presents three choices for extension type:
 ```
 
 After you enter the extension name, `flet-pkg` checks **PyPI**, **GitHub**, and the **Flet SDK monorepo** for existing packages. If matches are found, you'll see a warning with links before a confirmation prompt.
+
+If `pydantic-ai` is installed (via `flet-pkg[ai]`), you'll also be prompted for AI refinement options.
 
 ### Non-interactive mode
 
@@ -84,6 +116,25 @@ Use a local Flutter package (skip download):
 
 ```bash
 flet-pkg create -t auto -f my_package -l ./path/to/my_package
+```
+
+With AI refinement (Ollama, local):
+
+```bash
+flet-pkg create -f shimmer --ai-refine
+```
+
+With AI refinement (Anthropic):
+
+```bash
+export ANTHROPIC_API_KEY=sk-...
+flet-pkg create -f shimmer --ai-refine --ai-provider anthropic
+```
+
+Verbose output with coverage breakdown:
+
+```bash
+flet-pkg create -f onesignal_flutter -v
 ```
 
 ### Validation rules
