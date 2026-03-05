@@ -2,6 +2,10 @@
 
 ## {{ control_name }}
 
+`{{ control_name }}` is a Flet Service extension based on `ft.Service`.
+
+### Import
+
 ```python
 from {{ package_name }} import {{ control_name }}
 ```
@@ -12,14 +16,61 @@ TODO: Document properties here.
 
 ### Methods
 
-#### `example_method(value: str) -> None`
-
-Example method that calls the Flutter side.
-
-**Parameters:**
-
-- `value` (str): The value to send.
+TODO: Document methods here.
 
 ### Events
 
 TODO: Document event handlers here.
+
+### Example
+
+```python
+{% if include_console -%}
+import logging
+
+{% endif -%}
+import flet as ft
+from {{ package_name }} import {{ control_name }}
+{%- if include_console %}
+from {{ package_name }}.console import DebugConsole, setup_logging
+
+logger = setup_logging(level=logging.DEBUG)
+{%- endif %}
+
+
+async def main(page: ft.Page):
+    page.title = "{{ control_name }} Example"
+{%- if include_console %}
+
+    debug = DebugConsole()
+    page.appbar = ft.AppBar(
+        title=ft.Text("{{ control_name }} Example"),
+        actions=[debug.icon],
+    )
+{%- endif %}
+
+    {{ control_name_snake }} = {{ control_name }}(
+{%- if include_console %}
+        on_error=lambda e: logger.error(f"Error: {e.method}: {e.message}"),
+{%- else %}
+        on_error=lambda e: print(f"Error: {e.method}: {e.message}"),
+{%- endif %}
+    )
+    page.services.append({{ control_name_snake }})
+
+    async def on_click(e):
+        await {{ control_name_snake }}.example_method("hello")
+{%- if include_console %}
+
+    logger.info("App started")
+{%- endif %}
+
+    page.add(
+        ft.Text("{{ control_name }} Service Example"),
+        ft.ElevatedButton("Call Example Method", on_click=on_click),
+    )
+
+
+if __name__ == "__main__":
+    ft.run(main)
+```

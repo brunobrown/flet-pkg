@@ -1,39 +1,43 @@
-{% if include_console %}import logging
+{% if include_console -%}
+import logging
 
-{% endif %}import flet as ft
+{% endif -%}
+import flet as ft
 from {{ package_name }} import {{ control_name }}
-{% if include_console %}
+{%- if include_console %}
 from {{ package_name }}.console import DebugConsole, setup_logging
 
 logger = setup_logging(level=logging.DEBUG)
-{% endif %}
+{%- endif %}
 
-def main(page: ft.Page):
+
+async def main(page: ft.Page):
     page.title = "{{ control_name }} Example"
-{% if include_console %}
+{%- if include_console %}
+
     debug = DebugConsole()
     page.appbar = ft.AppBar(
         title=ft.Text("{{ control_name }} Example"),
         actions=[debug.icon],
     )
-{% endif %}
-    {{ control_name_snake }} = {{ control_name }}(
-{% if include_console %}
-        on_error=lambda e: logger.error(f"Error: {e.method}: {e.message}"),
-{% else %}
-        on_error=lambda e: print(f"Error: {e.method}: {e.message}"),
-{% endif %}
-    )
-    page.services.add({{ control_name_snake }})
+{%- endif %}
 
-    # TODO: Replace example_method with an actual method from your extension.
+    {{ control_name_snake }} = {{ control_name }}(
+{%- if include_console %}
+        on_error=lambda e: logger.error(f"Error: {e.method}: {e.message}"),
+{%- else %}
+        on_error=lambda e: print(f"Error: {e.method}: {e.message}"),
+{%- endif %}
+    )
+    page.services.append({{ control_name_snake }})
+
     async def on_click(e):
         """Handle button click. Change this to call your extension's method."""
         await {{ control_name_snake }}.example_method("hello")
-{% if include_console %}
+{%- if include_console %}
 
     logger.info("App started")
-{% endif %}
+{%- endif %}
 
     page.add(
         ft.Text("{{ control_name }} Service Example"),

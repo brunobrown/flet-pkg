@@ -3,28 +3,68 @@
 ## Installation
 
 ```bash
+# Using UV (recommended)
+uv add {{ project_name }}
+
+# Using pip
 pip install {{ project_name }}
 ```
 
 ## Basic Usage
 
 ```python
+{% if include_console -%}
+import logging
+
+{% endif -%}
 import flet as ft
 from {{ package_name }} import {{ control_name }}
+{%- if include_console %}
+from {{ package_name }}.console import DebugConsole, setup_logging
 
-def main(page: ft.Page):
+logger = setup_logging(level=logging.DEBUG)
+{%- endif %}
+
+
+async def main(page: ft.Page):
     page.title = "{{ control_name }} Example"
+{%- if include_console %}
 
-    {{ control_name_snake }} = {{ control_name }}()
-    page.services.add({{ control_name_snake }})
+    debug = DebugConsole()
+    page.appbar = ft.AppBar(
+        title=ft.Text("{{ control_name }} Example"),
+        actions=[debug.icon],
+    )
+{%- endif %}
+
+    {{ control_name_snake }} = {{ control_name }}(
+{%- if include_console %}
+        on_error=lambda e: logger.error(f"Error: {e.method}: {e.message}"),
+{%- else %}
+        on_error=lambda e: print(f"Error: {e.method}: {e.message}"),
+{%- endif %}
+    )
+    page.services.append({{ control_name_snake }})
+
+    async def on_click(e):
+        await {{ control_name_snake }}.example_method("hello")
+{%- if include_console %}
+
+    logger.info("App started")
+{%- endif %}
 
     page.add(
-        ft.Text("{{ control_name }} is running!"),
+        ft.Text("{{ control_name }} Service Example"),
+        ft.ElevatedButton("Call Example Method", on_click=on_click),
     )
 
-ft.run(main)
+
+if __name__ == "__main__":
+    ft.run(main)
 ```
 
-## Configuration
+## Next Steps
 
-TODO: Document configuration options and properties for the {{ control_name }} service.
+- Check the [API Reference](api-reference.md) for all available methods and properties.
+- See the [Examples](examples.md) for more usage patterns.
+- See the [Changelog](changelog.md) for version history.

@@ -574,7 +574,7 @@ The deterministic pipeline (without AI) achieves the following coverage on teste
 | Package | Type | Coverage |
 |---------|------|----------|
 | `shared_preferences` | Service | 100.0% |
-| `url_launcher` | Service | 100.0% |
+| `url_launcher` | UI Control | 100.0% |
 | `local_auth` | Service | 100.0% |
 | `geolocator` | Service | 100.0% |
 | `share_plus` | Service | 100.0% |

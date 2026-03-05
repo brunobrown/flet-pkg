@@ -2,7 +2,7 @@
 
 ## {{ control_name }}
 
-`{{ control_name }}` is a visual Flet control based on `ft.LayoutControl`.
+`{{ control_name }}` is a Flet UI Control extension based on `ft.LayoutControl`.
 
 ### Import
 
@@ -23,19 +23,51 @@ Since `{{ control_name }}` extends `ft.LayoutControl`, it inherits all standard 
 | `align` | `Alignment` | Alignment of the control |
 | `visible` | `bool` | Whether the control is visible |
 
+TODO: Document custom properties here.
+
+### Events
+
+TODO: Document event handlers here.
+
 ### Example
 
 ```python
+{% if include_console -%}
+import logging
+
+{% endif -%}
 import flet as ft
 from {{ package_name }} import {{ control_name }}
+{%- if include_console %}
+from {{ package_name }}.console import DebugConsole, setup_logging
 
-def main(page: ft.Page):
+logger = setup_logging(level=logging.DEBUG)
+{%- endif %}
+
+
+async def main(page: ft.Page):
+    page.title = "{{ control_name }} Example"
+{%- if include_console %}
+
+    debug = DebugConsole()
+    page.appbar = ft.AppBar(
+        title=ft.Text("{{ control_name }} Example"),
+        actions=[debug.icon],
+    )
+    logger.info("App started")
+{%- endif %}
+
     page.add(
         {{ control_name }}(
-            width=200,
-            height=200,
+{%- if include_console %}
+            on_error=lambda e: logger.error(f"Error: {e.method}: {e.message}"),
+{%- else %}
+            on_error=lambda e: print(f"Error: {e.method}: {e.message}"),
+{%- endif %}
         ),
     )
 
-ft.run(main)
+
+if __name__ == "__main__":
+    ft.run(main)
 ```

@@ -1,32 +1,35 @@
-{% if include_console %}import logging
+{% if include_console -%}
+import logging
 
-{% endif %}import flet as ft
+{% endif -%}
+import flet as ft
 from {{ package_name }} import {{ control_name }}
-{% if include_console %}
+{%- if include_console %}
 from {{ package_name }}.console import DebugConsole, setup_logging
 
 logger = setup_logging(level=logging.DEBUG)
-{% endif %}
+{%- endif %}
 
-def main(page: ft.Page):
+
+async def main(page: ft.Page):
     page.title = "{{ control_name }} Example"
-{% if include_console %}
+{%- if include_console %}
+
     debug = DebugConsole()
     page.appbar = ft.AppBar(
         title=ft.Text("{{ control_name }} Example"),
         actions=[debug.icon],
     )
-
     logger.info("App started")
-{% endif %}
+{%- endif %}
 
     page.add(
         {{ control_name }}(
-{% if include_console %}
+{%- if include_console %}
             on_error=lambda e: logger.error(f"Error: {e.method}: {e.message}"),
-{% else %}
+{%- else %}
             on_error=lambda e: print(f"Error: {e.method}: {e.message}"),
-{% endif %}
+{%- endif %}
         ),
     )
 
