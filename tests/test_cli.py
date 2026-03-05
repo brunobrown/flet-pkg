@@ -1,3 +1,4 @@
+import re
 from unittest.mock import patch
 
 from typer.testing import CliRunner
@@ -6,6 +7,12 @@ from flet_pkg import __version__
 from flet_pkg.main import app
 
 runner = CliRunner()
+
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _strip_ansi(text: str) -> str:
+    return _ANSI_RE.sub("", text)
 
 
 def _no_registry_check(project_name: str) -> None:
@@ -26,8 +33,9 @@ class TestCLI:
     def test_create_help(self):
         result = runner.invoke(app, ["create", "--help"])
         assert result.exit_code == 0
-        assert "--type" in result.output
-        assert "--flutter-package" in result.output
+        output = _strip_ansi(result.output)
+        assert "--type" in output
+        assert "--flutter-package" in output
 
     def test_create_invalid_type(self):
         result = runner.invoke(app, ["create", "--type", "invalid"])
