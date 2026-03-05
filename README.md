@@ -64,8 +64,10 @@
 - [Coverage](#coverage)
 - [Examples](#examples)
 - [Development](#development)
-- [Support](#support)
-- [License](#license)
+- [Learn more](#learn-more)
+- [Flet Community](#-flet-community)
+- [Support](#-support)
+- [Contributing](#-contributing)
 
 ---
 
