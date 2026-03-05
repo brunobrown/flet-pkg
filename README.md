@@ -654,13 +654,9 @@ uv run flet-pkg create
 ---
 
 ## Learn more
-
-* [Website](https://flet.dev)
 * [Documentation](https://brunobrown.github.io/flet-pkg)
-* [Roadmap](https://flet.dev/roadmap)
-* [Apps Gallery](https://flet.dev/gallery)
 
-## 🌐 Flet Community
+## Flet Community
 
 Join the community to contribute or get help:
 
@@ -670,13 +666,13 @@ Join the community to contribute or get help:
 * [Bluesky](https://bsky.app/profile/fletdev.bsky.social)
 * [Email us](mailto:hello@flet.dev)
 
-## ⭐ Support
+## Support
 
 If you like this project, please give it a [GitHub star](https://github.com/brunobrown/flet-pkg) ⭐
 
 ---
 
-## 🤝 Contributing
+## Contributing
 
 Contributions and feedback are welcome!
 
