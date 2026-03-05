@@ -94,3 +94,9 @@ possibly-unresolved-reference = "warn"
 unresolved-reference = "error"
 unresolved-import = "error"
 invalid-type-form = "warn"
+
+[[tool.ty.overrides]]
+# pydantic_ai is an optional dependency (flet-pkg[ai]) — not installed in CI.
+include = ["src/flet_pkg/core/ai/**", "src/flet_pkg/commands/create.py"]
+[tool.ty.overrides.rules]
+unresolved-import = "ignore"
