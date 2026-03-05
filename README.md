@@ -49,6 +49,7 @@
 - [Verbose Mode & Coverage Score](#verbose-mode--coverage-score)
 - [AI Refinement](#ai-refinement)
   - [Free (Ollama - Local)](#free-ollama---local)
+    - [Ollama Model Requirements](#ollama-model-requirements)
   - [Cloud Providers](#cloud-providers)
   - [How AI Refinement Works](#how-ai-refinement-works)
 - [MCP Server](#mcp-server)
@@ -256,7 +257,7 @@ Usage: flet-pkg create [OPTIONS]
 |--------|------|---------|-------------|
 | `--ai-refine / --no-ai-refine` | BOOL | _(prompted)_ | Run AI-powered refinement on generated code. Requires `uv add flet-pkg[ai]` or `pip install flet-pkg[ai]`. |
 | `--ai-provider` | TEXT | `ollama` | AI provider: `ollama` (local, free), `anthropic` (Claude), `openai` (GPT), or `google` (Gemini). |
-| `--ai-model` | TEXT | _(per provider)_ | Override the default model. Defaults: `ollama`=`qwen2.5-coder`, `anthropic`=`claude-sonnet-4-6`, `openai`=`gpt-4.1-mini`, `google`=`gemini-2.5-flash`. |
+| `--ai-model` | TEXT | _(per provider)_ | Override the default model. Defaults: `ollama`=`qwen2.5-coder:14b`, `anthropic`=`claude-sonnet-4-6`, `openai`=`gpt-4.1-mini`, `google`=`gemini-2.5-flash`. See [Ollama Model Requirements](#ollama-model-requirements) for RAM sizing. |
 
 #### Output Options
 
@@ -324,8 +325,8 @@ No API key needed. Runs entirely on your machine:
 # 1. Install Ollama (https://ollama.com)
 curl -fsSL https://ollama.ai/install.sh | sh
 
-# 2. Pull the default coding model
-ollama pull qwen2.5-coder
+# 2. Pull the default coding model (see RAM requirements below)
+ollama pull qwen2.5-coder:14b
 
 # 3. Install the AI dependency
 uv add flet-pkg[ai]    # or: pip install flet-pkg[ai]
@@ -333,6 +334,20 @@ uv add flet-pkg[ai]    # or: pip install flet-pkg[ai]
 # 4. Create with AI refinement (Ollama is the default provider)
 flet-pkg create -f shimmer --ai-refine
 ```
+
+#### Ollama Model Requirements
+
+Choose the model size based on your available RAM. Larger models produce better results but require more memory:
+
+| Model | Size | Min RAM | GPU | Notes |
+|-------|------|---------|-----|-------|
+| `qwen2.5-coder:7b` | ~4.5 GB | 8 GB | Optional | Fast, but may fail on complex structured output |
+| `qwen2.5-coder:14b` | ~9 GB | 16 GB | Optional | **Default — best balance of quality and speed** |
+| `qwen2.5-coder:32b` | ~19 GB | 32 GB | Recommended | Best quality, but slow without dedicated GPU |
+
+> **Warning:** Running a model that exceeds your available RAM will cause severe system slowdown or freeze. If you have **no dedicated GPU** (NVIDIA/AMD), the model runs entirely on CPU+RAM. For machines with 24 GB RAM or less, use the **14b** model (default).
+>
+> To override the model: `flet-pkg create --ai-refine --ai-model qwen2.5-coder:7b`
 
 ### Cloud Providers
 

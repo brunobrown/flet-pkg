@@ -10,8 +10,14 @@ Coordinates the four-step pipeline:
 from __future__ import annotations
 
 import asyncio
+import difflib
 from pathlib import Path
 from typing import Any
+
+from rich.live import Live
+from rich.spinner import Spinner
+from rich.table import Table as RichGrid
+from rich.text import Text
 
 from flet_pkg.core.ai.agent import (
     ArchitectDeps,
@@ -92,13 +98,18 @@ class AIRefiner:
 
         if verbose:
             console.print(
-                f"    [dim]Gap report: {len(gap_report.gaps)} gaps, "
+                f"    [cyan]├─ Gap Report:[/cyan] {len(gap_report.gaps)} gaps, "
                 f"{gap_report.feasible_gaps} feasible, "
-                f"coverage {gap_report.coverage_pct:.1f}%[/dim]"
+                f"{gap_report.coverage_pct:.1f}%"
             )
             for gap in gap_report.gaps:
-                feasible_tag = "" if gap.feasible else " [infeasible]"
-                console.print(f"      [dim]{gap.kind.value}: {gap.dart_name}{feasible_tag}[/dim]")
+                if gap.feasible:
+                    console.print(f"    [dim]│    {gap.kind.value}: {gap.dart_name}[/dim]")
+                else:
+                    console.print(
+                        f"    [dim]│    {gap.kind.value}: {gap.dart_name}"
+                        f" [yellow]\\[infeasible][/yellow][/dim]"
+                    )
 
         if gap_report.feasible_gaps == 0:
             return RefinementResult(
@@ -135,14 +146,29 @@ class AIRefiner:
             f"an improvement plan."
         )
 
-        architect_result = await architect_agent.run(architect_prompt, deps=architect_deps)
+        if verbose:
+            spinner = _tree_spinner("Architect analyzing gaps...")
+            with Live(spinner, console=console, refresh_per_second=10, transient=True):
+                architect_result = await architect_agent.run(architect_prompt, deps=architect_deps)
+        else:
+            architect_result = await architect_agent.run(architect_prompt, deps=architect_deps)
         architect_plan = architect_result.output
+
+        # Track token usage
+        total_input_tokens = 0
+        total_output_tokens = 0
+        arch_usage = architect_result.usage()
+        total_input_tokens += arch_usage.request_tokens or 0
+        total_output_tokens += arch_usage.response_tokens or 0
 
         if verbose:
             n = len(architect_plan.suggestions)
-            console.print(f"    [dim]Architect: {n} suggestion(s)[/dim]")
+            console.print(f"    [cyan]├─ Architect:[/cyan] {n} suggestion(s)")
             for s in architect_plan.suggestions:
-                console.print(f"      [dim][P{s.priority}] {s.target_file}: {s.description}[/dim]")
+                console.print(
+                    f"    [dim]│    [/dim][bold]\\[P{s.priority}][/bold] "
+                    f"[dim]{s.target_file}: {s.description}[/dim]"
+                )
 
         if not architect_plan.suggestions:
             return RefinementResult(
@@ -158,6 +184,7 @@ class AIRefiner:
         total_applied = 0
         total_failed = 0
         validation_passed = False
+        all_diffs: list[tuple[str, str]] = []
 
         for attempt in range(1 + MAX_RETRIES):
             editor_deps = EditorDeps(
@@ -178,18 +205,44 @@ class AIRefiner:
             if editor_deps.feedback:
                 editor_prompt += f"\n\nFeedback from previous attempt: {editor_deps.feedback}"
 
-            editor_result = await editor_agent.run(editor_prompt, deps=editor_deps)
+            if verbose:
+                with Live(
+                    _tree_spinner(f"Editor applying improvements (attempt {attempt + 1})..."),
+                    console=console,
+                    refresh_per_second=10,
+                    transient=True,
+                ):
+                    editor_result = await editor_agent.run(editor_prompt, deps=editor_deps)
+            else:
+                editor_result = await editor_agent.run(editor_prompt, deps=editor_deps)
+
+            # Track editor token usage
+            ed_usage = editor_result.usage()
+            total_input_tokens += ed_usage.request_tokens or 0
+            total_output_tokens += ed_usage.response_tokens or 0
+
+            # Snapshot before applying edits
+            before_files = dict(current_files)
 
             # Apply edits
             modified_files, applied, failed = apply_edits(editor_result.output.edits, current_files)
             total_applied += applied
             total_failed += failed
 
+            # Generate unified diffs for modified files
+            attempt_diffs = _compute_diffs(before_files, modified_files)
+            all_diffs.extend(attempt_diffs)
+
             if verbose:
                 console.print(
-                    f"    [dim]Editor attempt {attempt + 1}: "
-                    f"{applied} applied, {failed} failed[/dim]"
+                    f"    [cyan]├─ Editor[/cyan] (attempt {attempt + 1}): "
+                    f"{applied} applied, {failed} failed"
                 )
+                # Show colored diffs
+                for filename, diff_text in attempt_diffs:
+                    for line in diff_text.splitlines():
+                        colored = _colorize_diff_line(line)
+                        console.print(f"    [dim]│[/dim]    {colored}")
 
             # Validate
             errors = validate_python_syntax(modified_files)
@@ -197,20 +250,46 @@ class AIRefiner:
                 current_files = modified_files
                 validation_passed = True
                 if verbose:
-                    console.print("    [dim]Validation: passed[/dim]")
+                    console.print("    [cyan]├─ Validation:[/cyan] [green]passed ✓[/green]")
                 break
 
             if verbose:
-                console.print(f"    [dim]Validation: {len(errors)} error(s)[/dim]")
+                console.print(
+                    f"    [cyan]├─ Validation:[/cyan] [red]FAILED ✗[/red] ({len(errors)} error(s))"
+                )
                 for err in errors[:5]:
-                    console.print(f"      [dim]{err}[/dim]")
+                    console.print(f"    [dim]│    {err}[/dim]")
 
             # Feed errors back for retry
             editor_deps.feedback = "Validation errors:\n" + "\n".join(errors)
 
+        # Detect pending suggestions (not applied by Editor)
+        files_with_diffs = {fname for fname, _ in all_diffs}
+        pending = [s for s in architect_plan.suggestions if s.target_file not in files_with_diffs]
+
+        if verbose and pending:
+            console.print("    [cyan]├─ Pending suggestions (not applied):[/cyan]")
+            for s in pending:
+                console.print(
+                    f"    [dim]│[/dim]    [bold]\\[P{s.priority}][/bold] "
+                    f"[dim]{s.target_file}: {s.description}[/dim]"
+                )
+
         # Update generated_files in-place with refined content
         if validation_passed:
             generated_files.update(current_files)
+
+        if verbose:
+
+            def _fmt_tokens(n: int) -> str:
+                return f"{n / 1000:.1f}K" if n >= 1000 else str(n)
+
+            total = total_input_tokens + total_output_tokens
+            console.print(
+                f"    [cyan]└─ Tokens:[/cyan] input {_fmt_tokens(total_input_tokens)}, "
+                f"output {_fmt_tokens(total_output_tokens)} "
+                f"[dim](total {_fmt_tokens(total)})[/dim]"
+            )
 
         return RefinementResult(
             gap_report=gap_report,
@@ -222,4 +301,50 @@ class AIRefiner:
                 f"Applied {total_applied} edits ({total_failed} failed). "
                 f"Validation: {'passed' if validation_passed else 'FAILED'}."
             ),
+            input_tokens=total_input_tokens,
+            output_tokens=total_output_tokens,
+            file_diffs=all_diffs,
+            pending_suggestions=pending,
         )
+
+
+def _compute_diffs(before: dict[str, str], after: dict[str, str]) -> list[tuple[str, str]]:
+    """Compute unified diffs for files that changed."""
+    diffs: list[tuple[str, str]] = []
+    for filename in after:
+        old = before.get(filename, "")
+        new = after[filename]
+        if old == new:
+            continue
+        diff_lines = list(
+            difflib.unified_diff(
+                old.splitlines(keepends=True),
+                new.splitlines(keepends=True),
+                fromfile=f"a/{filename}",
+                tofile=f"b/{filename}",
+            )
+        )
+        if diff_lines:
+            diffs.append((filename, "".join(diff_lines)))
+    return diffs
+
+
+def _tree_spinner(label: str) -> RichGrid:
+    """Create a Rich renderable with the spinner aligned to the tree prefix."""
+    spinner = Spinner("dots")
+    t = RichGrid.grid(padding=0)
+    t.add_row(Text("    ├─ ", style="cyan"), spinner, Text(f" {label}", style="cyan"))
+    return t
+
+
+def _colorize_diff_line(line: str) -> str:
+    """Apply Rich markup to a single diff line."""
+    if line.startswith("+++") or line.startswith("---"):
+        return f"[bold]{line}[/bold]"
+    if line.startswith("@@"):
+        return f"[cyan]{line}[/cyan]"
+    if line.startswith("+"):
+        return f"[green]{line}[/green]"
+    if line.startswith("-"):
+        return f"[red]{line}[/red]"
+    return line

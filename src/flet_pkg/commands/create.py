@@ -297,6 +297,7 @@ def create(
                     result.coverage_pct,
                     result.gap_report.total_generated,
                     result.gap_report.total_dart_api,
+                    ai_pct=result.ai_coverage_pct,
                 )
                 if verbose:
                     print_coverage_table(result.gap_report)

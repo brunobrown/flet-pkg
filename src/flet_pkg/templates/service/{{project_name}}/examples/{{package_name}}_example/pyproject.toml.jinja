@@ -5,15 +5,15 @@ description = "Example app for {{ project_name }}"
 requires-python = ">=3.10"
 dependencies = [
     "flet>=0.80.0",
-    "{{ project_name }}",
+    "{{ project_name }}>=0.1.0",
 ]
-
-[tool.setuptools.package-dir]
-"" = "src"
 
 [build-system]
 requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
+
+[tool.flet.app]
+path = "src"
 
 [tool.flet.dependencies]
 {{ project_name }} = { path = "../../" }

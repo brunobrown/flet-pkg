@@ -18,23 +18,41 @@ def _progress_bar(pct: float, width: int = 10) -> str:
     return "\u2588" * filled + "\u2591" * (width - filled)
 
 
-def print_coverage_score(pct: float, total_generated: int, total_dart_api: int) -> None:
-    """Always-visible one-line coverage score."""
+def _pct_color(pct: float) -> str:
+    if pct >= 90:
+        return "green"
+    if pct >= 70:
+        return "yellow"
+    return "red"
+
+
+def print_coverage_score(
+    pct: float,
+    total_generated: int,
+    total_dart_api: int,
+    ai_pct: float | None = None,
+) -> None:
+    """Always-visible one-line coverage score, with optional AI comparison."""
     if total_dart_api == 0:
         console.print("  [info]Coverage: N/A (no Dart API found)[/info]")
         return
 
-    if pct >= 90:
-        color = "green"
-    elif pct >= 70:
-        color = "yellow"
-    else:
-        color = "red"
+    color = _pct_color(pct)
 
-    console.print(
-        f"  [{color}]Coverage: {pct:.1f}%[/{color}] "
-        f"({total_generated}/{total_dart_api} features mapped)"
-    )
+    if ai_pct is not None and ai_pct > pct:
+        ai_color = _pct_color(ai_pct)
+        delta = ai_pct - pct
+        console.print(
+            f"  [{color}]Coverage: {pct:.1f}%[/{color}] "
+            f"[dim]->[/dim] [{ai_color}]{ai_pct:.1f}%[/{ai_color}] "
+            f"[dim](+{delta:.1f}% with AI)[/dim] "
+            f"({total_generated}/{total_dart_api} features mapped)"
+        )
+    else:
+        console.print(
+            f"  [{color}]Coverage: {pct:.1f}%[/{color}] "
+            f"({total_generated}/{total_dart_api} features mapped)"
+        )
 
 
 def print_coverage_table(report: GapReport) -> None:

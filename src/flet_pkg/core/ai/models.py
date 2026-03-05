@@ -127,3 +127,9 @@ class RefinementResult:
     edits_failed: int = 0
     validation_passed: bool = False
     overall_assessment: str = ""
+    input_tokens: int = 0
+    output_tokens: int = 0
+    file_diffs: list[tuple[str, str]] = field(default_factory=list)
+    """(filename, unified_diff_text) for files modified by AI."""
+    pending_suggestions: list[ImprovementSuggestion] = field(default_factory=list)
+    """Architect suggestions that the Editor did not apply."""

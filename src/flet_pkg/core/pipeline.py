@@ -24,7 +24,8 @@ from flet_pkg.core.parser import parse_dart_package_api
 from flet_pkg.ui.console import console
 
 if TYPE_CHECKING:
-    from flet_pkg.core.ai.models import GapReport
+    from flet_pkg.core.ai.config import AIConfig
+    from flet_pkg.core.ai.models import GapReport, RefinementResult
 
 
 @dataclass
@@ -37,6 +38,7 @@ class PipelineResult:
     warnings: list[str] = field(default_factory=list)
     coverage_pct: float = 0.0
     gap_report: GapReport | None = None
+    ai_coverage_pct: float | None = None
 
 
 class GenerationPipeline:
@@ -236,7 +238,10 @@ class GenerationPipeline:
 
                 config = AIConfig.load(provider=ai_provider, model=ai_model)
                 if config.is_available():
-                    console.print("  [info]Running AI refinement...[/info]")
+                    label = "Running AI refinement..."
+                    if verbose:
+                        label += f" [dim]({config.provider} / {config.model})[/dim]"
+                    console.print(f"  [info]{label}[/info]")
                     refiner = AIRefiner(config)
                     ai_result = refiner.refine(
                         api,
@@ -253,6 +258,16 @@ class GenerationPipeline:
                         )
                     if not ai_result.validation_passed and ai_result.edits_applied > 0:
                         result.warnings.append("AI edits failed validation — using originals")
+                    # Estimate post-AI coverage from applied edits
+                    if ai_result.validation_passed and ai_result.edits_applied > 0:
+                        gap = ai_result.gap_report
+                        if gap.total_dart_api > 0:
+                            new_mapped = gap.total_generated + ai_result.edits_applied
+                            result.ai_coverage_pct = min(
+                                new_mapped / gap.total_dart_api * 100, 100.0
+                            )
+                    # Always write .ai-review.md when AI refinement runs
+                    _write_ai_review(project_dir, config, ai_result)
                 else:
                     console.print("  [warning]AI skipped: no API key configured[/warning]")
             except ImportError:
@@ -349,6 +364,49 @@ class GenerationPipeline:
                 pass
 
 
+def _write_ai_review(
+    project_dir: Path,
+    config: AIConfig,
+    ai_result: RefinementResult,
+) -> None:
+    """Write .ai-review.md with diffs and pending suggestions."""
+    lines: list[str] = []
+    lines.append("# AI Review Report\n")
+
+    # Header
+    lines.append(f"- **Provider:** {config.provider}")
+    lines.append(f"- **Model:** {config.model}")
+    lines.append(f"- **Coverage:** {ai_result.gap_report.coverage_pct:.1f}%")
+    lines.append(f"- **Edits applied:** {ai_result.edits_applied}")
+    lines.append(f"- **Edits failed:** {ai_result.edits_failed}")
+    status = "passed" if ai_result.validation_passed else "FAILED"
+    lines.append(f"- **Validation:** {status}")
+    lines.append("")
+
+    # Diffs section
+    if ai_result.file_diffs:
+        lines.append("## Diffs\n")
+        for filename, diff_text in ai_result.file_diffs:
+            lines.append(f"### {filename}\n")
+            lines.append("```diff")
+            lines.append(diff_text.rstrip())
+            lines.append("```\n")
+    else:
+        lines.append("## Diffs\n")
+        lines.append("_No files were modified._\n")
+
+    # Pending suggestions
+    if ai_result.pending_suggestions:
+        lines.append("## Suggestions (not applied)\n")
+        for s in ai_result.pending_suggestions:
+            lines.append(f"- **[P{s.priority}] {s.target_file}:** {s.description}")
+        lines.append("")
+
+    review_path = project_dir / ".ai-review.md"
+    review_path.write_text("\n".join(lines), encoding="utf-8")
+    console.print("  [info]Review saved: .ai-review.md[/info]")
+
+
 def _format_ai_error(exc: Exception) -> str:
     """Format AI provider errors into user-friendly messages."""
     msg = str(exc)
@@ -372,6 +430,11 @@ def _format_ai_error(exc: Exception) -> str:
             "AI skipped: model failed to produce valid structured output. "
             "Try a larger model (e.g. --ai-model qwen2.5-coder:32b) "
             "or use a cloud provider (--ai-provider anthropic)."
+        )
+    if "500" in msg or "server_error" in lower or "internal server error" in lower:
+        return (
+            "AI skipped: provider returned a server error (500). "
+            "This is a transient issue on the provider's side. Try again later."
         )
 
     return f"AI refinement failed: {msg}"
