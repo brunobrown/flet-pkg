@@ -158,6 +158,8 @@ Optionally, an **AI refinement** step can analyze coverage gaps and auto-improve
 flet-pkg create
 ```
 
+![flet_pkg](https://github.com/user-attachments/assets/dea17fa6-496e-4666-9127-c159e2954797)
+
 The CLI walks you through each step with prompts:
 
 1. **Extension type** — Auto-detect (recommended), Service, or UI Control
