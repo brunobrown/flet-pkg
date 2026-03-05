@@ -58,6 +58,14 @@ jobs:
         run: |
           uv run pytest -v -m "not network" --cov=flet_pkg --cov-report=term-missing --cov-report=xml
 
+      - name: Upload coverage to Codecov
+        if: matrix.python-version == '3.13'
+        uses: codecov/codecov-action@v5
+        with:
+          files: coverage.xml
+          flags: unittests
+          fail_ci_if_error: false
+
       - name: Build docs
         if: matrix.python-version == '3.13'
         run: |

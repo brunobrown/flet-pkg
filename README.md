@@ -7,7 +7,7 @@
 [![Main](https://github.com/brunobrown/flet-pkg/actions/workflows/main.yml/badge.svg?branch=main)](https://github.com/brunobrown/flet-pkg/actions/workflows/main.yml)
 [![Dev](https://github.com/brunobrown/flet-pkg/actions/workflows/dev.yml/badge.svg?branch=dev)](https://github.com/brunobrown/flet-pkg/actions/workflows/dev.yml)
 ![Docs](https://img.shields.io/badge/https%3A%2F%2Fimg.shields.io%2Fbadge%2Fdocs-mkdocs-blue?label=docs)
-![Coverage](https://img.shields.io/badge/coverage-95%25-orange)
+[![Coverage](https://codecov.io/gh/brunobrown/flet-pkg/graph/badge.svg)](https://codecov.io/gh/brunobrown/flet-pkg)
 ![License](https://img.shields.io/badge/license-MIT-yellow)
 
 ---
