@@ -4,8 +4,6 @@ Produces the Dart service (or widget) implementation that handles
 method dispatch from Python, event listener setup, and real SDK calls.
 """
 
-from __future__ import annotations
-
 from flet_pkg.core.generators.base import CodeGenerator
 from flet_pkg.core.models import (
     GenerationPlan,

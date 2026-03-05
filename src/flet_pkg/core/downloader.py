@@ -5,8 +5,6 @@ Downloads Flutter package source tarballs from pub.dev with
 local caching to avoid repeated downloads.
 """
 
-from __future__ import annotations
-
 import tarfile
 from dataclasses import dataclass
 from pathlib import Path

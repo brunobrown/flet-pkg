@@ -4,8 +4,6 @@ Produces ``types.py`` with enum classes and event dataclasses
 that mirror the Dart SDK's types.
 """
 
-from __future__ import annotations
-
 from flet_pkg.core.generators.base import CodeGenerator
 from flet_pkg.core.models import GenerationPlan, SubControlPlan
 from flet_pkg.core.parser import camel_to_snake

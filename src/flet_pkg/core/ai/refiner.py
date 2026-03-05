@@ -7,8 +7,6 @@ Coordinates the four-step pipeline:
 4. Validator (deterministic — syntax check + retry loop)
 """
 
-from __future__ import annotations
-
 import asyncio
 import difflib
 from pathlib import Path

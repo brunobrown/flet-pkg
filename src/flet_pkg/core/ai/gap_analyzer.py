@@ -5,8 +5,6 @@ to identify exactly what the pipeline missed and why. Produces a structured
 ``GapReport`` — no LLM required.
 """
 
-from __future__ import annotations
-
 from flet_pkg.core.ai.models import GapItem, GapKind, GapReport
 from flet_pkg.core.models import DartPackageAPI, GenerationPlan
 from flet_pkg.core.parser import camel_to_snake

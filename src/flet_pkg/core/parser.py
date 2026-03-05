@@ -5,8 +5,6 @@ Parses Dart package source files to extract classes, methods, enums,
 and their metadata into structured ``DartPackageAPI`` models.
 """
 
-from __future__ import annotations
-
 import keyword
 import re
 from pathlib import Path

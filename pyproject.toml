@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 name = "flet-pkg"
 version = "0.1.0"
 description = "CLI tool to scaffold Flet extension packages"
-requires-python = ">=3.11"
+requires-python = ">=3.10"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "Bruno Brown", email = "brunobrown.86@gmail.com" }]

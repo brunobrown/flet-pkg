@@ -4,8 +4,6 @@ Separates reasoning (Architect) from editing (Editor) following
 the Architect/Editor pattern from Aider research.
 """
 
-from __future__ import annotations
-
 ARCHITECT_SYSTEM_PROMPT = """\
 You are a Flet extension code architect. You analyze coverage gaps between
 a Flutter/Dart package and its generated Python/Flet extension code.

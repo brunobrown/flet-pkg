@@ -4,7 +4,7 @@
   <strong>CLI tool that scaffolds Flet extension packages from Flutter packages, with auto-generated Python controls, Dart bridge code, type mappings, and event handlers.</strong>
 </p>
 
-![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white)
+![Python](https://img.shields.io/badge/Python-3.10+-3776AB?style=for-the-badge&logo=python&logoColor=white)
 ![Flet](https://img.shields.io/badge/Flet-0.80.0+-00B4D8?style=for-the-badge&logo=flutter&logoColor=white)
 ![CI-MAIN](https://img.shields.io/badge/ci|main-passing-brightgreen?style=for-the-badge)
 ![CI-DEV](https://img.shields.io/badge/ci|dev-passing-brightgreen?style=for-the-badge)
@@ -108,7 +108,7 @@ uv add flet-pkg[mcp]
 pip install flet-pkg[mcp]
 ```
 
-**Requirements:** Python 3.11+
+**Requirements:** Python 3.10+
 
 ---
 

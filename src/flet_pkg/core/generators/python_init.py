@@ -4,8 +4,6 @@ Produces the package's ``__init__.py`` with all public exports
 and ``__all__`` definition.
 """
 
-from __future__ import annotations
-
 from flet_pkg.core.generators.base import CodeGenerator
 from flet_pkg.core.models import GenerationPlan, SubControlPlan
 from flet_pkg.core.parser import camel_to_snake

@@ -9,8 +9,6 @@ Flet types (``ft.Alignment``, ``ft.BoxFit``, etc.) and typed Dart
 getters (``getAlignment``, ``getBoxFit``, etc.).
 """
 
-from __future__ import annotations
-
 import re
 
 # Direct type mappings: Dart type -> Python type

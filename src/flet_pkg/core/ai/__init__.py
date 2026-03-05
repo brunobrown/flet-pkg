@@ -6,8 +6,6 @@ to analyze coverage gaps and apply LLM-driven improvements to generated code.
 Requires: ``uv add flet-pkg[ai]`` (pydantic-ai).
 """
 
-from __future__ import annotations
-
 from flet_pkg.core.ai.config import AIConfig
 from flet_pkg.core.ai.models import GapReport, RefinementResult
 

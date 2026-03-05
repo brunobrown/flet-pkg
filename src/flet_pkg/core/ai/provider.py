@@ -4,8 +4,6 @@ Creates pydantic-ai model instances from AIConfig. All pydantic-ai imports
 are deferred so that non-AI users are never affected by missing dependencies.
 """
 
-from __future__ import annotations
-
 from typing import Any
 
 from flet_pkg.core.ai.config import AIConfig

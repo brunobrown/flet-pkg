@@ -5,8 +5,6 @@ the Flet 0.80.x+ extension pattern with ``@ft.control()``, sub-module
 properties, event handlers, and async methods.
 """
 
-from __future__ import annotations
-
 from flet_pkg.core.generators.base import CodeGenerator
 from flet_pkg.core.models import GenerationPlan, MethodPlan, SiblingWidgetPlan, SubControlPlan
 from flet_pkg.core.parser import camel_to_snake

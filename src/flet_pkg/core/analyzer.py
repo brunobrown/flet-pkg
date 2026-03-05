@@ -6,8 +6,6 @@ drives the code generators: detects namespaces, events, properties,
 and maps types.
 """
 
-from __future__ import annotations
-
 import re
 from statistics import median
 

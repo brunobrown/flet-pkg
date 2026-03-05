@@ -1,7 +1,5 @@
 """Recursive dataclass-to-JSON-safe dict converter."""
 
-from __future__ import annotations
-
 import dataclasses
 from enum import Enum
 from pathlib import Path

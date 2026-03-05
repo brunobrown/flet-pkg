@@ -4,8 +4,6 @@ Produces one file per sub-module (e.g., ``user.py``, ``notifications.py``)
 following the composition pattern used in flet-onesignal.
 """
 
-from __future__ import annotations
-
 from flet_pkg.core.generators.base import CodeGenerator
 from flet_pkg.core.models import GenerationPlan, MethodPlan, SubModulePlan
 from flet_pkg.core.parser import camel_to_snake

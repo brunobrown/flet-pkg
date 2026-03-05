@@ -19,6 +19,7 @@ class DerivedNames:
         control_name: PascalCase control class name (e.g. ``Onesignal``).
         control_name_snake: Snake-case control name (e.g. ``onesignal``).
     """
+
     project_name: str
     package_name: str
     control_name: str

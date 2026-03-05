@@ -4,8 +4,6 @@ Exposes scaffolding and code generation capabilities to AI agents
 via the Model Context Protocol (tools, resources, prompts).
 """
 
-from __future__ import annotations
-
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass

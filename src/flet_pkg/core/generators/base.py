@@ -1,7 +1,5 @@
 """Base class for code generators."""
 
-from __future__ import annotations
-
 from abc import ABC, abstractmethod
 
 from flet_pkg.core.models import GenerationPlan
