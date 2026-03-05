@@ -38,6 +38,15 @@ _INTERNAL_METHOD_NAMES = frozenset(
         "jsonRepresentation",
         "convertToJsonString",
         "jsonEncode",
+        # Dart control-flow keywords that the parser may capture as methods
+        "catch",
+        "catch_",
+        "finally",
+        "finally_",
+        "then",
+        "then_",
+        "rethrow",
+        "rethrow_",
     }
 )
 

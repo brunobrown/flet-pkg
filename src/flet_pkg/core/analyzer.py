@@ -6,6 +6,7 @@ drives the code generators: detects namespaces, events, properties,
 and maps types.
 """
 
+import keyword
 import re
 from statistics import median
 
@@ -59,8 +60,29 @@ _INTERNAL_METHODS = frozenset(
         "jsonRepresentation",
         "convertToJsonString",
         "jsonEncode",
+        # Dart control-flow keywords that the parser may capture as methods
+        "catch",
+        "catch_",
+        "finally",
+        "finally_",
+        "then",
+        "then_",
+        "rethrow",
+        "rethrow_",
     }
 )
+
+
+def _safe_module_name(name: str) -> str:
+    """Ensure a module/namespace name is not a Python keyword.
+
+    Python keywords like ``async``, ``await``, ``class`` cannot be used as
+    module filenames or property accessors.  Appends ``_ops`` suffix when
+    a collision is detected (e.g. ``async`` → ``async_ops``).
+    """
+    if keyword.iskeyword(name):
+        return f"{name}_ops"
+    return name
 
 
 class PackageAnalyzer:
@@ -1081,13 +1103,14 @@ class PackageAnalyzer:
                 # "LocalAuth" → suffix "entication" (lowercase) = mid-word split.
                 if not suffix[0].isupper():
                     return None
-                return camel_to_snake(suffix)
+                ns = camel_to_snake(suffix)
+                return _safe_module_name(ns)
 
         # Check if the class file suggests a namespace
         if cls.source_file:
             stem = cls.source_file.rsplit("/", maxsplit=1)[-1].replace(".dart", "")
             if stem != control_name_lower and not stem.startswith("_"):
-                return stem
+                return _safe_module_name(stem)
 
         return None
 

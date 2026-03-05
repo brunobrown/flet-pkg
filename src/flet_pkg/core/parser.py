@@ -151,6 +151,17 @@ _DART_KEYWORDS = frozenset(
     }
 )
 
+# Dart control-flow keywords that can be falsely parsed as method names.
+# e.g. ``} catch (error, stackTrace) {`` matches the method regex as ``catch(…)``.
+_DART_CONTROL_FLOW_NAMES = frozenset(
+    {
+        "catch",
+        "finally",
+        "then",
+        "rethrow",
+    }
+)
+
 # Parent classes that indicate a platform implementation (not a public API).
 # Classes extending these are skipped entirely.
 PLATFORM_IMPL_BASES = (
@@ -300,6 +311,7 @@ def _should_skip_method(
     return (
         method_name in UI_METHODS
         or method_name in LIFECYCLE_METHODS
+        or method_name in _DART_CONTROL_FLOW_NAMES
         or method_name.startswith("_")
         # Skip on* methods UNLESS they are Stream getters (event sources)
         or (method_name.startswith("on") and not return_type.startswith("Stream"))
