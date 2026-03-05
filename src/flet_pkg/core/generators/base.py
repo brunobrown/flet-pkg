@@ -22,7 +22,15 @@ class CodeGenerator(ABC):
 
     @staticmethod
     def _format_docstring(doc: str, indent: str = "    ") -> list[str]:
-        """Format a docstring preserving multi-line structure."""
+        """Format a docstring preserving multi-line structure.
+
+        Args:
+            doc: Raw docstring text.
+            indent: Indentation prefix for each line.
+
+        Returns:
+            List of formatted docstring lines, or empty list if *doc* is empty.
+        """
         if not doc:
             return []
         doc_lines = doc.split("\n")
@@ -36,7 +44,14 @@ class CodeGenerator(ABC):
 
     @staticmethod
     def _py_default(dart_default: str | None) -> str:
-        """Convert a Dart default value to a Python literal."""
+        """Convert a Dart default value to a Python literal.
+
+        Args:
+            dart_default: Dart default value string (e.g. ``"true"``, ``"0.5"``).
+
+        Returns:
+            Equivalent Python literal string (e.g. ``"True"``, ``"0.5"``).
+        """
         if not dart_default:
             return "None"
         _DART_TO_PYTHON = {

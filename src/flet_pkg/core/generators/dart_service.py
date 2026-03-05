@@ -139,6 +139,13 @@ class DartServiceGenerator(CodeGenerator):
         Produces a ``StatefulWidget`` whose ``build()`` reads properties
         using typed getters (``getAlignment``, ``getBoxFit``, etc.) and
         wraps the SDK widget in a ``LayoutControl``.
+
+        Args:
+            plan: Generation plan with widget properties and events.
+            control_snake: Snake-case control name for file references.
+
+        Returns:
+            Complete Dart source code string.
         """
         widget_class = f"{plan.control_name}Widget"
         state_class = f"_{plan.control_name}WidgetState"

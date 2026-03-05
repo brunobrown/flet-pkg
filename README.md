@@ -573,11 +573,13 @@ The deterministic pipeline (without AI) achieves the following coverage on teste
 
 | Package | Type | Coverage |
 |---------|------|----------|
-| `onesignal_flutter` | Service | 95.4% |
-| `url_launcher` | Service | 95.0% |
-| `battery_plus` | Service | 95.0% |
-| `local_auth` | Service | 94.9% |
-| `share_plus` | Service | 94.6% |
+| `shared_preferences` | Service | 100.0% |
+| `url_launcher` | Service | 100.0% |
+| `local_auth` | Service | 100.0% |
+| `geolocator` | Service | 100.0% |
+| `share_plus` | Service | 100.0% |
+| `image_picker` | Service | 100.0% |
+| `onesignal_flutter` | Service | 97.6% |
 
 Coverage is measured as the percentage of public Dart API surface (methods, properties, enums, events) that is correctly mapped to Python code.
 

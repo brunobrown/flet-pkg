@@ -326,8 +326,14 @@ def _auto_detect_type(
 ) -> str:
     """Download (or locate) the Flutter package and detect extension type.
 
-    Returns ``"ui_control"`` or ``"service"``.  Falls back to a manual
-    choice prompt if the download or detection fails.
+    Falls back to a manual choice prompt if the download or detection fails.
+
+    Args:
+        flutter_package: Name of the Flutter package on pub.dev.
+        local_package: Optional local path to the Flutter package.
+
+    Returns:
+        Extension type string: ``"ui_control"`` or ``"service"``.
     """
     from flet_pkg.core.downloader import PubDevDownloader
     from flet_pkg.core.parser import detect_extension_type
@@ -400,7 +406,11 @@ AI_PROVIDERS = {
 
 
 def _ask_ai_refine() -> bool:
-    """Ask the user whether to enable AI refinement."""
+    """Ask the user whether to enable AI refinement.
+
+    Returns:
+        ``True`` if the user opts in and ``pydantic_ai`` is installed.
+    """
     try:
         import pydantic_ai  # noqa: F401
 
@@ -445,7 +455,8 @@ def _ask_ai_provider() -> tuple[str, str | None]:
 def _detect_ollama_model() -> str | None:
     """Detect installed Ollama models and let the user pick one.
 
-    Returns the selected model name, or ``None`` to use the default.
+    Returns:
+        Selected model name, or ``None`` to use the default.
     """
     from flet_pkg.core.ai.config import AIConfig, list_ollama_models
 

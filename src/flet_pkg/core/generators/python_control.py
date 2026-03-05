@@ -373,6 +373,17 @@ class PythonControlGenerator(CodeGenerator):
                     else:
                         lines.append(f"            {p.python_name}: {p.dart_name} parameter.")
             lines.append('        """')
+        elif method.params:
+            doc = method.python_name.replace("_", " ").capitalize()
+            lines.append(f'        """{doc}.')
+            lines.append("")
+            lines.append("        Args:")
+            for p in method.params:
+                if p.docstring:
+                    lines.append(f"            {p.python_name}: {p.docstring}")
+                else:
+                    lines.append(f"            {p.python_name}: {p.dart_name} parameter.")
+            lines.append('        """')
         else:
             doc = method.python_name.replace("_", " ").capitalize()
             lines.append(f'        """{doc}."""')

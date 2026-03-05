@@ -27,28 +27,56 @@ class DerivedNames:
 
 
 def validate_package_name(name: str) -> str | None:
-    """Validate a Python package name. Returns an error message or ``None``."""
+    """Validate a Python package name.
+
+    Args:
+        name: Package name to validate.
+
+    Returns:
+        Error message string, or ``None`` if valid.
+    """
     if not re.fullmatch(r"[a-z][a-z0-9_]*", name):
         return "Must be a valid Python identifier: lowercase, underscores, starts with letter."
     return None
 
 
 def validate_project_name(name: str) -> str | None:
-    """Validate a project name (lowercase + hyphens). Returns an error message or ``None``."""
+    """Validate a project name (lowercase + hyphens).
+
+    Args:
+        name: Project name to validate.
+
+    Returns:
+        Error message string, or ``None`` if valid.
+    """
     if not re.fullmatch(r"[a-z][a-z0-9\-]*", name):
         return "Must be lowercase letters, digits, and hyphens. Starts with letter."
     return None
 
 
 def validate_flutter_package(name: str) -> str | None:
-    """Validate a pub.dev package name. Returns an error message or ``None``."""
+    """Validate a pub.dev package name.
+
+    Args:
+        name: Flutter package name to validate.
+
+    Returns:
+        Error message string, or ``None`` if valid.
+    """
     if not re.fullmatch(r"[a-z][a-z0-9_]*", name):
         return "Must be a valid pub.dev package name: lowercase, underscores, starts with letter."
     return None
 
 
 def validate_control_name(name: str) -> str | None:
-    """Validate a PascalCase control class name. Returns an error message or ``None``."""
+    """Validate a PascalCase control class name.
+
+    Args:
+        name: Control class name to validate.
+
+    Returns:
+        Error message string, or ``None`` if valid.
+    """
     if not re.fullmatch(r"[A-Z][a-zA-Z0-9]*", name):
         return "Must be PascalCase: starts with uppercase letter, alphanumeric."
     return None

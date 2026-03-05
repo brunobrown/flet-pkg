@@ -14,7 +14,14 @@ class PythonTypesGenerator(CodeGenerator):
 
     @staticmethod
     def _optional_type(field_type: str) -> str:
-        """Wrap a type in Optional[], avoiding redundant Optional[X | None]."""
+        """Wrap a type in ``Optional[]``, avoiding redundant ``Optional[X | None]``.
+
+        Args:
+            field_type: Python type annotation string.
+
+        Returns:
+            Wrapped type string.
+        """
         if "| None" in field_type:
             return field_type
         return f"Optional[{field_type}]"
@@ -186,7 +193,14 @@ class PythonTypesGenerator(CodeGenerator):
 
     @staticmethod
     def _flatten_sub_controls(sub_controls: list[SubControlPlan]) -> list[SubControlPlan]:
-        """Flatten a recursive sub-control tree (leaves first, deduplicated)."""
+        """Flatten a recursive sub-control tree (leaves first, deduplicated).
+
+        Args:
+            sub_controls: Top-level sub-control plans (may contain nested children).
+
+        Returns:
+            Flat list with leaves before parents, no duplicates.
+        """
         result: list[SubControlPlan] = []
         seen: set[str] = set()
         for sc in sub_controls:

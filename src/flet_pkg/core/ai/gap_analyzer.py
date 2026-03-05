@@ -5,6 +5,8 @@ to identify exactly what the pipeline missed and why. Produces a structured
 ``GapReport`` — no LLM required.
 """
 
+import re
+
 from flet_pkg.core.ai.models import GapItem, GapKind, GapReport
 from flet_pkg.core.models import DartPackageAPI, GenerationPlan
 from flet_pkg.core.parser import camel_to_snake
@@ -85,6 +87,17 @@ _CALLBACK_PREFIXES = (
     "NullableIndexedWidgetBuilder",
 )
 
+# Regex for add/remove listener/observer/handler patterns.
+_LISTENER_RE = re.compile(r"^(add|remove)(.*?)(Listener|Observer|Handler|Subscription)s?$")
+
+# Methods that map to constructor properties (SDK init flow).
+_INIT_METHOD_NAMES = frozenset({"initialize", "init", "setup", "configure"})
+
+
+def _is_listener_method(name: str) -> bool:
+    """Return True if *name* is an add/remove listener/observer/handler."""
+    return _LISTENER_RE.match(name) is not None
+
 
 class GapAnalyzer:
     """Deterministic gap analysis between Dart source and generated plan."""
@@ -95,7 +108,16 @@ class GapAnalyzer:
         plan: GenerationPlan,
         extension_type: str,
     ) -> GapReport:
-        """Analyze gaps based on extension type."""
+        """Analyze gaps between Dart API surface and generated plan.
+
+        Args:
+            api: Parsed Dart package API.
+            plan: Generated plan to compare against.
+            extension_type: Either ``"service"`` or ``"ui_control"``.
+
+        Returns:
+            A ``GapReport`` with coverage stats and missing items.
+        """
         if extension_type == "service":
             return self._analyze_service_gaps(api, plan)
         return self._analyze_ui_control_gaps(api, plan)
@@ -136,6 +158,11 @@ class GapAnalyzer:
         for e in plan.enums:
             generated_enums.add(e.python_name)
 
+        # Collect generated property names
+        generated_props: set[str] = set()
+        for p in plan.properties:
+            generated_props.add(p.python_name)
+
         # Analyze class methods
         for cls in api.classes:
             for method in cls.methods:
@@ -167,10 +194,34 @@ class GapAnalyzer:
                         cat["Events"][1] += 1
                     continue
 
+                # add/remove Listener/Observer/Handler → covered by events
+                if _is_listener_method(method.name) and generated_events:
+                    report.total_dart_api += 1
+                    cat["Events"][0] += 1
+                    report.total_generated += 1
+                    cat["Events"][1] += 1
+                    continue
+
+                # Bare getters/setters mapped as properties
+                python_name = camel_to_snake(method.name)
+                if (method.is_getter or method.is_setter) and python_name in generated_props:
+                    report.total_dart_api += 1
+                    cat["Methods"][0] += 1
+                    report.total_generated += 1
+                    cat["Methods"][1] += 1
+                    continue
+
+                # Init/setup methods covered by constructor properties
+                if method.name in _INIT_METHOD_NAMES and generated_props:
+                    report.total_dart_api += 1
+                    cat["Methods"][0] += 1
+                    report.total_generated += 1
+                    cat["Methods"][1] += 1
+                    continue
+
                 # Regular methods
                 report.total_dart_api += 1
                 cat["Methods"][0] += 1
-                python_name = camel_to_snake(method.name)
                 if python_name in generated_methods:
                     report.total_generated += 1
                     cat["Methods"][1] += 1

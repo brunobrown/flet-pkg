@@ -67,7 +67,12 @@ def _get_downloader(ctx: ToolContext) -> PubDevDownloader:
 def tool_derive_names(flutter_package: str) -> dict:
     """Derive project/package/control names from a Flutter package name.
 
-    Returns project_name, package_name, control_name, and control_name_snake.
+    Args:
+        flutter_package: A pub.dev package name (e.g. ``onesignal_flutter``).
+
+    Returns:
+        Dict with ``project_name``, ``package_name``, ``control_name``,
+        and ``control_name_snake``.
     """
     error = validate_flutter_package(flutter_package)
     if error:
@@ -85,8 +90,13 @@ def tool_derive_names(flutter_package: str) -> dict:
 def tool_map_dart_type(dart_type: str, flet_aware: bool = False) -> dict:
     """Convert a Dart type string to its Python/Flet equivalent.
 
-    Set flet_aware=True to use native Flet types (ft.Alignment, ft.Color, etc.)
-    for UI control extensions.
+    Args:
+        dart_type: Dart type string (e.g. ``"List<String>"``, ``"bool?"``).
+        flet_aware: Use native Flet types (``ft.Alignment``, ``ft.Color``, etc.)
+            for UI control extensions.
+
+    Returns:
+        Dict with ``dart_type``, ``python_type``, and ``skipped`` flag.
     """
     if flet_aware:
         result = map_dart_type_flet(dart_type)
@@ -110,7 +120,15 @@ def tool_map_dart_type(dart_type: str, flet_aware: bool = False) -> dict:
 
 @mcp.tool()
 def tool_fetch_metadata(flutter_package: str, ctx: ToolContext) -> dict:
-    """Get pub.dev package metadata (version, description, homepage)."""
+    """Get pub.dev package metadata (version, description, homepage).
+
+    Args:
+        flutter_package: A pub.dev package name.
+        ctx: MCP tool context for dependency injection.
+
+    Returns:
+        Dict with package metadata fields.
+    """
     downloader = _get_downloader(ctx)
     metadata = downloader.fetch_metadata(flutter_package)
     return to_dict(metadata)  # type: ignore[return-value]
@@ -126,6 +144,13 @@ def tool_detect_extension_type(flutter_package: str, ctx: ToolContext) -> dict:
     """Auto-detect whether a Flutter package should be a service or ui_control extension.
 
     Downloads the package (cached) and scans for widget classes.
+
+    Args:
+        flutter_package: A pub.dev package name.
+        ctx: MCP tool context for dependency injection.
+
+    Returns:
+        Dict with ``flutter_package`` and ``extension_type``.
     """
     from flet_pkg.core.parser import detect_extension_type
 

@@ -72,7 +72,11 @@ class AIConfig:
         )
 
     def is_available(self) -> bool:
-        """Check if the provider is configured and usable."""
+        """Check if the provider is configured and usable.
+
+        Returns:
+            ``True`` if the provider can be used (Ollama always, others need API key).
+        """
         if self.provider == "ollama":
             return True
         return bool(self.api_key)

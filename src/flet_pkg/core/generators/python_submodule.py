@@ -102,7 +102,15 @@ class PythonSubModuleGenerator(CodeGenerator):
         return "\n".join(lines)
 
     def _render_method(self, method: MethodPlan, sub: SubModulePlan) -> list[str]:
-        """Render a single method definition for a sub-module class."""
+        """Render a single async method definition for a sub-module class.
+
+        Args:
+            method: Method plan with name, params, and return type.
+            sub: Parent sub-module plan for invoke key generation.
+
+        Returns:
+            List of source code lines for the method.
+        """
         lines: list[str] = []
 
         # Build signature
@@ -140,6 +148,17 @@ class PythonSubModuleGenerator(CodeGenerator):
                         lines.append(f"            {p.python_name}: {p.docstring}")
                     else:
                         lines.append(f"            {p.python_name}: {p.dart_name} parameter.")
+            lines.append('        """')
+        elif method.params:
+            doc = method.python_name.replace("_", " ").capitalize()
+            lines.append(f'        """{doc}.')
+            lines.append("")
+            lines.append("        Args:")
+            for p in method.params:
+                if p.docstring:
+                    lines.append(f"            {p.python_name}: {p.docstring}")
+                else:
+                    lines.append(f"            {p.python_name}: {p.dart_name} parameter.")
             lines.append('        """')
         else:
             doc = method.python_name.replace("_", " ").capitalize()
