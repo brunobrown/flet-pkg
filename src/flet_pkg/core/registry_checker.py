@@ -79,13 +79,16 @@ def check_flet_packages(name: str) -> RegistryMatch | None:
 
 
 def check_github(query: str, max_results: int = 3) -> list[RegistryMatch]:
-    """Search GitHub repositories matching *query*.
+    """Search GitHub repositories whose name matches *query*.
+
+    Uses ``in:name`` to restrict the search to repository names only,
+    avoiding false positives from description/README mentions.
 
     Returns up to *max_results* matches, or an empty list on any
     network/timeout error.
     """
     url = "https://api.github.com/search/repositories"
-    params = {"q": query, "per_page": max_results}
+    params = {"q": f"{query} in:name", "per_page": max_results}
     try:
         response = httpx.get(url, params=params, follow_redirects=True, timeout=_TIMEOUT)
     except httpx.HTTPError:
@@ -95,8 +98,15 @@ def check_github(query: str, max_results: int = 3) -> list[RegistryMatch]:
         return []
 
     data = response.json()
+    query_lower = query.lower()
     results: list[RegistryMatch] = []
     for item in data.get("items", [])[:max_results]:
+        # full_name is "owner/repo-name" — check repo part
+        full_name = item.get("full_name", "").lower()
+        repo_name = full_name.rsplit("/", maxsplit=1)[-1] if "/" in full_name else full_name
+        # Only include repos whose name contains the full query
+        if query_lower not in repo_name:
+            continue
         results.append(
             RegistryMatch(
                 source="GitHub",

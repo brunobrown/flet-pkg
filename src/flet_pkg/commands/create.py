@@ -232,12 +232,26 @@ def create(
     if ai_refine is None:
         ai_refine = False
 
+    # Fetch Flutter package version for pubspec.yaml
+    flutter_package_version = "any"
+    if flutter_package and not local_package:
+        try:
+            from flet_pkg.core.downloader import PubDevDownloader
+
+            metadata = PubDevDownloader().fetch_metadata(flutter_package)
+            if metadata.version:
+                major, minor, *_ = metadata.version.split(".")
+                flutter_package_version = f"^{major}.{minor}.0"
+        except Exception:
+            pass
+
     context = {
         "project_name": project_name,
         "package_name": package_name,
         "control_name": control_name,
         "control_name_snake": derived.control_name_snake,
         "flutter_package": flutter_package,
+        "flutter_package_version": flutter_package_version,
         "description": description,
         "author": author,
         "include_console": console_module,

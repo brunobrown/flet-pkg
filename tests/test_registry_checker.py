@@ -137,8 +137,8 @@ class TestCheckGitHub:
         mock_response.json.return_value = {
             "items": [
                 {
-                    "full_name": f"user/repo-{i}",
-                    "html_url": f"https://github.com/user/repo-{i}",
+                    "full_name": f"user/flet-onesignal-{i}",
+                    "html_url": f"https://github.com/user/flet-onesignal-{i}",
                     "description": f"Repo {i}",
                 }
                 for i in range(10)

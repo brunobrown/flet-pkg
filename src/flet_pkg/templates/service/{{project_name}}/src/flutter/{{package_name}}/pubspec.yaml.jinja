@@ -10,7 +10,7 @@ dependencies:
   flutter:
     sdk: flutter
   flet: ^0.80.5
-  {{ flutter_package }}: # TODO: Add version constraint
+  {{ flutter_package }}: {{ flutter_package_version | default("any") }}
 
 dev_dependencies:
   flutter_test:
