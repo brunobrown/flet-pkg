@@ -108,6 +108,29 @@ def _is_listener_method(name: str) -> bool:
     return _LISTENER_RE.match(name) is not None
 
 
+# Verb prefixes that the analyzer considers as already meaningful —
+# bare getters without these get a ``get_`` or ``is_`` prefix added.
+_VERB_PREFIXES = ("get_", "is_", "are_", "can_", "has_", "should_", "does_", "will_", "was_")
+
+
+def _bare_getter_name(method, python_name: str) -> str:
+    """Return the prefixed name the analyzer would generate for a bare getter.
+
+    Mirrors the ``_normalize_method_name`` logic in ``analyzer.py``: bare
+    getters (no params, non-void return, no existing verb prefix) get a
+    ``get_`` or ``is_`` prefix.
+    """
+    if (
+        method.is_getter
+        and not method.params
+        and method.return_type not in ("void", "Future<void>")
+        and not any(python_name.startswith(vp) for vp in _VERB_PREFIXES)
+    ):
+        is_bool = method.return_type in ("bool", "bool?", "Future<bool>", "Future<bool?>")
+        return f"{'is_' if is_bool else 'get_'}{python_name}"
+    return python_name
+
+
 class GapAnalyzer:
     """Deterministic gap analysis between Dart source and generated plan."""
 
@@ -220,6 +243,10 @@ class GapAnalyzer:
                     cat["Methods"][1] += 1
                     continue
 
+                # Bare getter with get_/is_ prefix (analyzer adds prefix for
+                # unnamed getters with non-void return and no verb prefix)
+                prefixed_name = _bare_getter_name(method, python_name)
+
                 # Init/setup methods covered by constructor properties
                 if method.name in _INIT_METHOD_NAMES and generated_props:
                     report.total_dart_api += 1
@@ -231,7 +258,7 @@ class GapAnalyzer:
                 # Regular methods
                 report.total_dart_api += 1
                 cat["Methods"][0] += 1
-                if python_name in generated_methods:
+                if python_name in generated_methods or prefixed_name in generated_methods:
                     report.total_generated += 1
                     cat["Methods"][1] += 1
                 else:
