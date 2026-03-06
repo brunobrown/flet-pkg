@@ -241,3 +241,6 @@ pyrightconfig.json
 dart_wrappers/
 package/
 flet_pkg/python_wrappers/
+
+.claude
+tmp
