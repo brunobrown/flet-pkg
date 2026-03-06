@@ -1,0 +1,328 @@
+import pytest
+
+from flet_pkg.core.scaffolder import Scaffolder
+
+
+@pytest.fixture
+def service_context():
+    return {
+        "project_name": "flet-test",
+        "package_name": "flet_test",
+        "control_name": "TestControl",
+        "control_name_snake": "test_control",
+        "flutter_package": "test_flutter",
+        "description": "A test extension",
+        "author": "Test Author",
+        "include_console": True,
+    }
+
+
+class TestScaffolder:
+    def test_generates_project(self, tmp_path, service_context):
+        scaffolder = Scaffolder("service", service_context, tmp_path)
+        project_dir = scaffolder.generate()
+
+        assert project_dir.exists()
+        assert project_dir.name == "flet-test"
+
+    def test_generates_pyproject(self, tmp_path, service_context):
+        scaffolder = Scaffolder("service", service_context, tmp_path)
+        project_dir = scaffolder.generate()
+
+        pyproject = project_dir / "pyproject.toml"
+        assert pyproject.exists()
+        content = pyproject.read_text()
+        assert 'name = "flet-test"' in content
+
+    def test_generates_python_control(self, tmp_path, service_context):
+        scaffolder = Scaffolder("service", service_context, tmp_path)
+        project_dir = scaffolder.generate()
+
+        control_file = project_dir / "src" / "flet_test" / "test_control.py"
+        assert control_file.exists()
+        content = control_file.read_text()
+        assert "class TestControl(ft.Service)" in content
+        assert '@ft.control("TestControl")' in content
+
+    def test_generates_dart_extension(self, tmp_path, service_context):
+        scaffolder = Scaffolder("service", service_context, tmp_path)
+        project_dir = scaffolder.generate()
+
+        ext_file = project_dir / "src" / "flutter" / "flet_test" / "lib" / "src" / "extension.dart"
+        assert ext_file.exists()
+        content = ext_file.read_text()
+        assert "createService" in content
+        assert '"TestControl"' in content
+
+    def test_generates_dart_service(self, tmp_path, service_context):
+        scaffolder = Scaffolder("service", service_context, tmp_path)
+        project_dir = scaffolder.generate()
+
+        svc_file = (
+            project_dir
+            / "src"
+            / "flutter"
+            / "flet_test"
+            / "lib"
+            / "src"
+            / "test_control_service.dart"
+        )
+        assert svc_file.exists()
+        content = svc_file.read_text()
+        assert "TestControlService" in content
+
+    def test_ui_control_template(self, tmp_path):
+        context = {
+            "project_name": "flet-mywidget",
+            "package_name": "flet_mywidget",
+            "control_name": "MyWidget",
+            "control_name_snake": "my_widget",
+            "flutter_package": "my_widget_flutter",
+            "description": "A widget extension",
+            "author": "Test",
+            "include_console": True,
+        }
+        scaffolder = Scaffolder("ui_control", context, tmp_path)
+        project_dir = scaffolder.generate()
+
+        control_file = project_dir / "src" / "flet_mywidget" / "my_widget.py"
+        assert control_file.exists()
+        content = control_file.read_text()
+        assert "ft.LayoutControl" in content
+
+        ext_file = (
+            project_dir / "src" / "flutter" / "flet_mywidget" / "lib" / "src" / "extension.dart"
+        )
+        content = ext_file.read_text()
+        assert "createWidget" in content
+
+    def test_raises_on_existing_dir(self, tmp_path, service_context):
+        (tmp_path / "flet-test").mkdir()
+        scaffolder = Scaffolder("service", service_context, tmp_path)
+        with pytest.raises(FileExistsError):
+            scaffolder.generate()
+
+    def test_raises_on_invalid_template(self, tmp_path, service_context):
+        with pytest.raises(FileNotFoundError):
+            Scaffolder("nonexistent", service_context, tmp_path)
+
+    def test_resolves_variable_in_paths(self, tmp_path, service_context):
+        scaffolder = Scaffolder("service", service_context, tmp_path)
+        project_dir = scaffolder.generate()
+
+        # Check that variable-named directories are resolved
+        assert (project_dir / "src" / "flet_test").is_dir()
+        assert (project_dir / "src" / "flutter" / "flet_test").is_dir()
+
+    def test_template_yaml_excluded(self, tmp_path, service_context):
+        scaffolder = Scaffolder("service", service_context, tmp_path)
+        project_dir = scaffolder.generate()
+
+        # template.yaml should not appear in output
+        for p in project_dir.rglob("template.yaml"):
+            pytest.fail(f"template.yaml found in output at {p}")
+
+    def test_service_stub_has_on_error(self, tmp_path, service_context):
+        scaffolder = Scaffolder("service", service_context, tmp_path)
+        project_dir = scaffolder.generate()
+
+        # Control file has on_error handler
+        control_file = project_dir / "src" / "flet_test" / "test_control.py"
+        content = control_file.read_text()
+        assert "on_error" in content
+        assert "TestControlErrorEvent" in content
+
+        # types.py has ErrorEvent dataclass
+        types_file = project_dir / "src" / "flet_test" / "types.py"
+        assert types_file.exists()
+        types_content = types_file.read_text()
+        assert "class TestControlErrorEvent" in types_content
+        assert "ft.Event" in types_content
+
+        # __init__.py exports ErrorEvent
+        init_file = project_dir / "src" / "flet_test" / "__init__.py"
+        init_content = init_file.read_text()
+        assert "TestControlErrorEvent" in init_content
+
+        # Dart service has _handleError
+        svc_file = (
+            project_dir
+            / "src"
+            / "flutter"
+            / "flet_test"
+            / "lib"
+            / "src"
+            / "test_control_service.dart"
+        )
+        dart_content = svc_file.read_text()
+        assert "_handleError" in dart_content
+        assert "triggerEvent" in dart_content
+
+        # Example has on_error
+        example_file = project_dir / "examples" / "flet_test_example" / "src" / "main.py"
+        example_content = example_file.read_text()
+        assert "on_error" in example_content
+
+    def test_generates_about_pkg_flet_guide(self, tmp_path, service_context):
+        scaffolder = Scaffolder("service", service_context, tmp_path)
+        project_dir = scaffolder.generate()
+
+        guide = project_dir / "about_pkg_flet.md"
+        assert guide.exists()
+        content = guide.read_text()
+
+        # Context variables are rendered
+        assert "flet-test" in content
+        assert "flet_test" in content
+        assert "TestControl" in content
+        assert "test_control" in content
+        assert "test_flutter" in content
+
+        # All 4 part headers present
+        assert "Part 1" in content
+        assert "Part 2" in content
+        assert "Part 3" in content
+        assert "Part 4" in content
+
+        # Skill-level labels
+        assert "Beginner" in content
+        assert "Intermediate" in content
+        assert "Advanced" in content
+        assert "Practical" in content
+
+        # Branding header
+        assert "About Package for Flet" in content
+        assert "flet-pkg" in content
+
+        # Analogy
+        assert "remote control" in content
+
+        # Debugging checklist
+        assert "Debugging Checklist" in content
+        assert "page.update()" in content
+
+        # LogCat section
+        assert "Android LogCat" in content
+        assert "flet_log.py" in content
+        assert "flet_log.sh" in content
+
+        # Scripts directory exists with both files
+        assert (project_dir / "scripts" / "flet_log.py").exists()
+        assert (project_dir / "scripts" / "flet_log.sh").exists()
+
+        # Service-specific content
+        assert "ft.Service" in content
+        assert "createService" in content
+
+        # Wheel / uv build section
+        assert "uv build" in content
+        assert "py3-none-any.whl" in content
+
+        # No unrendered Jinja2 variables remain
+        assert "{{" not in content
+        assert "}}" not in content
+
+    def test_ui_control_generates_about_pkg_flet_guide(self, tmp_path):
+        context = {
+            "project_name": "flet-mywidget",
+            "package_name": "flet_mywidget",
+            "control_name": "MyWidget",
+            "control_name_snake": "my_widget",
+            "flutter_package": "my_widget_flutter",
+            "description": "A widget extension",
+            "author": "Test",
+            "include_console": True,
+        }
+        scaffolder = Scaffolder("ui_control", context, tmp_path)
+        project_dir = scaffolder.generate()
+
+        guide = project_dir / "about_pkg_flet.md"
+        assert guide.exists()
+        content = guide.read_text()
+
+        # Context variables are rendered
+        assert "flet-mywidget" in content
+        assert "flet_mywidget" in content
+        assert "MyWidget" in content
+        assert "my_widget" in content
+        assert "my_widget_flutter" in content
+
+        # All 4 part headers present
+        assert "Part 1" in content
+        assert "Part 2" in content
+        assert "Part 3" in content
+        assert "Part 4" in content
+
+        # Skill-level labels
+        assert "Beginner" in content
+        assert "Intermediate" in content
+        assert "Advanced" in content
+        assert "Practical" in content
+
+        # Branding header
+        assert "About Package for Flet" in content
+        assert "flet-pkg" in content
+
+        # Analogy
+        assert "remote control" in content
+
+        # Debugging checklist
+        assert "Debugging Checklist" in content
+        assert "page.update()" in content
+
+        # LogCat section
+        assert "Android LogCat" in content
+        assert "flet_log.py" in content
+        assert "flet_log.sh" in content
+
+        # Scripts directory exists with both files
+        assert (project_dir / "scripts" / "flet_log.py").exists()
+        assert (project_dir / "scripts" / "flet_log.sh").exists()
+
+        # UI Control-specific content
+        assert "ft.LayoutControl" in content
+        assert "createWidget" in content
+
+        # Wheel / uv build section
+        assert "uv build" in content
+        assert "py3-none-any.whl" in content
+
+        # No unrendered Jinja2 variables remain
+        assert "{{" not in content
+        assert "}}" not in content
+
+    def test_ui_control_stub_has_on_error(self, tmp_path):
+        context = {
+            "project_name": "flet-mywidget",
+            "package_name": "flet_mywidget",
+            "control_name": "MyWidget",
+            "control_name_snake": "my_widget",
+            "flutter_package": "my_widget_flutter",
+            "description": "A widget extension",
+            "author": "Test",
+            "include_console": True,
+        }
+        scaffolder = Scaffolder("ui_control", context, tmp_path)
+        project_dir = scaffolder.generate()
+
+        # Control file has on_error handler
+        control_file = project_dir / "src" / "flet_mywidget" / "my_widget.py"
+        content = control_file.read_text()
+        assert "on_error" in content
+        assert "MyWidgetErrorEvent" in content
+
+        # types.py has ErrorEvent dataclass
+        types_file = project_dir / "src" / "flet_mywidget" / "types.py"
+        assert types_file.exists()
+        types_content = types_file.read_text()
+        assert "class MyWidgetErrorEvent" in types_content
+
+        # __init__.py exports ErrorEvent
+        init_file = project_dir / "src" / "flet_mywidget" / "__init__.py"
+        init_content = init_file.read_text()
+        assert "MyWidgetErrorEvent" in init_content
+
+        # Example has on_error
+        example_file = project_dir / "examples" / "flet_mywidget_example" / "src" / "main.py"
+        example_content = example_file.read_text()
+        assert "on_error" in example_content

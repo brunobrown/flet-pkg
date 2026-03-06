@@ -5,6 +5,7 @@
 *.swp
 *.tmp
 *.lock
+!uv.lock
 .DS_Store
 .atom/
 .buildlog/
@@ -237,10 +238,6 @@ poetry.toml
 
 # LSP config files
 pyrightconfig.json
-
-dart_wrappers/
-package/
-flet_pkg/python_wrappers/
 
 .claude
 tmp

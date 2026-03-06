@@ -1,0 +1,12 @@
+from dataclasses import dataclass
+from typing import Optional
+import flet as ft
+
+
+@dataclass
+class {{ control_name }}ErrorEvent(ft.Event["{{ control_name }}"]):
+    """Event fired when an error occurs."""
+
+    method: Optional[str] = None
+    message: Optional[str] = None
+    stack_trace: Optional[str] = None

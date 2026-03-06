@@ -1,0 +1,113 @@
+site_name: flet-pkg
+site_description: CLI tool to scaffold Flet extension packages
+site_url: https://brunobrown.github.io/flet-pkg
+repo_url: https://github.com/brunobrown/flet-pkg
+repo_name: brunobrown/flet-pkg
+
+theme:
+  name: material
+  logo: assets/logo.png
+  favicon: assets/logo.png
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/brightness-7
+        name: Dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/brightness-4
+        name: Light mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - navigation.footer
+    - content.code.copy
+    - content.code.annotate
+    - search.highlight
+    - search.suggest
+    - toc.follow
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/brunobrown/flet-pkg
+      name: flet-pkg on GitHub
+    - icon: fontawesome/brands/discord
+      link: https://discord.gg/dzWXP8SHG8
+      name: Community Discord
+    - icon: fontawesome/brands/x-twitter
+      link: https://x.com/fletdev
+      name: Flet on X
+    - icon: fontawesome/brands/bluesky
+      link: https://bsky.app/profile/fletdev.bsky.social
+      name: Flet on Bluesky
+
+extra_css:
+  - assets/stylesheets/extra.css
+
+extra_javascript:
+  - assets/javascripts/external-links.js
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          options:
+            docstring_style: google
+            show_source: true
+            show_root_heading: true
+            show_signature_annotations: true
+            merge_init_into_class: true
+            separate_signature: true
+            show_symbol_type_heading: true
+            show_symbol_type_toc: true
+            members_order: source
+
+markdown_extensions:
+  - attr_list
+  - def_list
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.snippets
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - toc:
+      permalink: "#"
+
+nav:
+  - Home: index.md
+  - Getting Started: getting-started.md
+  - CLI Reference: cli-reference.md
+  - MCP Server: mcp-server.md
+  - Templates:
+      - Service: extension-templates/service.md
+      - UI Control: extension-templates/ui-control.md
+  - Architecture: architecture.md
+  - API Reference:
+      - Overview: api/index.md
+      - Pipeline: api/pipeline.md
+      - Scaffolder: api/scaffolder.md
+      - Validators: api/validators.md
+      - Models: api/models.md
+      - Type Map: api/type-map.md
+      - Downloader: api/downloader.md
+      - Parser: api/parser.md
+      - Analyzer: api/analyzer.md
+      - Generators: api/generators.md
+      - AI Refinement: api/ai.md
+      - MCP Server: api/mcp.md
+  - Contributing: contributing.md

@@ -1,0 +1,73 @@
+# API Reference
+
+## {{ control_name }}
+
+`{{ control_name }}` is a Flet UI Control extension based on `ft.LayoutControl`.
+
+### Import
+
+```python
+from {{ package_name }} import {{ control_name }}
+```
+
+### Properties
+
+Since `{{ control_name }}` extends `ft.LayoutControl`, it inherits all standard layout properties:
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `width` | `float` | Width of the control |
+| `height` | `float` | Height of the control |
+| `margin` | `Margin` | Margin around the control |
+| `padding` | `Padding` | Padding inside the control |
+| `align` | `Alignment` | Alignment of the control |
+| `visible` | `bool` | Whether the control is visible |
+
+TODO: Document custom properties here.
+
+### Events
+
+TODO: Document event handlers here.
+
+### Example
+
+```python
+{% if include_console -%}
+import logging
+
+{% endif -%}
+import flet as ft
+from {{ package_name }} import {{ control_name }}
+{%- if include_console %}
+from {{ package_name }}.console import DebugConsole, setup_logging
+
+logger = setup_logging(level=logging.DEBUG)
+{%- endif %}
+
+
+async def main(page: ft.Page):
+    page.title = "{{ control_name }} Example"
+{%- if include_console %}
+
+    debug = DebugConsole()
+    page.appbar = ft.AppBar(
+        title=ft.Text("{{ control_name }} Example"),
+        actions=[debug.icon],
+    )
+    logger.info("App started")
+{%- endif %}
+
+    page.add(
+        {{ control_name }}(
+{%- if include_console %}
+            on_error=lambda e: logger.error(f"Error: {e.method}: {e.message}"),
+{%- else %}
+            on_error=lambda e: print(f"Error: {e.method}: {e.message}"),
+{%- endif %}
+        ),
+    )
+
+
+if __name__ == "__main__":
+    ft.run(main)
+```

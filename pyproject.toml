@@ -1,10 +1,102 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
 [project]
 name = "flet-pkg"
-version = "0.0.0"
-description = "Add your description here"
-requires-python = ">=3.12"
-dependencies = [
-    "flet>=0.27.6",
-    "jinja2>=3.1.6",
-    "requests>=2.32.3",
+version = "0.1.0"
+description = "CLI tool to scaffold Flet extension packages"
+requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Bruno Brown", email = "brunobrown.86@gmail.com" }]
+keywords = ["flet", "flutter", "scaffold", "cli", "extension"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Software Development :: Code Generators",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Typing :: Typed",
 ]
+dependencies = [
+    "typer>=0.12.0",
+    "rich>=13.0.0",
+    "jinja2>=3.1.0",
+    "pyyaml>=6.0",
+    "httpx>=0.27.0",
+]
+
+[project.optional-dependencies]
+ai = ["pydantic-ai>=1.0.0"]
+mcp = ["mcp[cli]>=1.0.0"]
+
+[project.scripts]
+flet-pkg = "flet_pkg.main:app"
+flet-pkg-mcp = "flet_pkg.mcp.server:main"
+
+[project.urls]
+Homepage = "https://github.com/brunobrown/flet-pkg"
+Documentation = "https://brunobrown.github.io/flet-pkg"
+Repository = "https://github.com/brunobrown/flet-pkg"
+Issues = "https://github.com/brunobrown/flet-pkg/issues"
+Changelog = "https://github.com/brunobrown/flet-pkg/blob/main/CHANGELOG.md"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/flet_pkg"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=7.0.0",
+    "pytest-asyncio>=0.24.0",
+    "mcp[cli]>=1.0.0",
+]
+docs = [
+    "mkdocs>=1.6.0",
+    "mkdocs-material>=9.6.0",
+    "mkdocstrings[python]>=0.29.0",
+    "pymdown-extensions>=10.14.0",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+extend-exclude = ["flet-*"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["flet_pkg"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short"
+markers = [
+    "network: tests that download packages from pub.dev (deselect with -m 'not network')",
+]
+
+[tool.ty.rules]
+possibly-unresolved-reference = "warn"
+unresolved-reference = "error"
+unresolved-import = "error"
+invalid-type-form = "warn"
+
+[[tool.ty.overrides]]
+# pydantic_ai is an optional dependency (flet-pkg[ai]) — not installed in CI.
+include = ["src/flet_pkg/core/ai/**", "src/flet_pkg/commands/create.py"]
+[tool.ty.overrides.rules]
+unresolved-import = "ignore"

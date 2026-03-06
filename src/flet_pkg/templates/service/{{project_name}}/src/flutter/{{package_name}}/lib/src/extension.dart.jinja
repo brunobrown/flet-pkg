@@ -1,0 +1,14 @@
+import 'package:flet/flet.dart';
+import '{{ control_name_snake }}_service.dart';
+
+class Extension extends FletExtension {
+  @override
+  FletService? createService(Control control) {
+    switch (control.type) {
+      case "{{ control_name }}":
+        return {{ control_name }}Service(control: control);
+      default:
+        return null;
+    }
+  }
+}

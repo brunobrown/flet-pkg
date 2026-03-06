@@ -1,0 +1,19 @@
+import 'package:flet/flet.dart';
+import 'package:flutter/material.dart';
+
+class {{ control_name }}Control extends StatelessWidget {
+  final Control control;
+  const {{ control_name }}Control({super.key, required this.control});
+
+  @override
+  Widget build(BuildContext context) {
+    // TODO: Replace with your actual Flutter widget
+    Widget myWidget = Container(
+      color: control.getColor("color", context),
+      child: const Center(
+        child: Text("{{ control_name }}"),
+      ),
+    );
+    return LayoutControl(control: control, child: myWidget);
+  }
+}
