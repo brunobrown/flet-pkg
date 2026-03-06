@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.1.0] - 2026-03-05
+## [0.1.1] - 2026-03-05
 
 ### Added
 
@@ -32,5 +32,3 @@
 - **Dart control-flow filtering** — false method matches from `catch`/`finally`/`then` patterns are excluded from generation.
 - **Test suite** — 383 tests covering models, type map, downloader, analyzer, generators, pipeline, scaffolder, CLI, validators, and coverage.
 - **CI/CD** — GitHub Actions workflows for `dev` and `main` branches with ruff, ty, pytest, and mkdocs build.
-
-[0.1.0]: https://github.com/brunobrown/flet-pkg/releases/tag/v0.1.0
