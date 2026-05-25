@@ -310,37 +310,37 @@ class TestDartUIControlGenerator:
     def test_generates_widget_file(self, ui_plan):
         gen = DartServiceGenerator()
         files = gen.generate(ui_plan)
-        assert "rive_widget.dart" in files
+        assert "rive_control.dart" in files
 
     def test_contains_stateful_widget(self, ui_plan):
         gen = DartServiceGenerator()
         files = gen.generate(ui_plan)
-        content = files["rive_widget.dart"]
-        assert "class RiveWidget extends StatefulWidget" in content
+        content = files["rive_control.dart"]
+        assert "class RiveControl extends StatefulWidget" in content
 
     def test_contains_state_class(self, ui_plan):
         gen = DartServiceGenerator()
         files = gen.generate(ui_plan)
-        content = files["rive_widget.dart"]
-        assert "class _RiveWidgetState extends State<RiveWidget>" in content
+        content = files["rive_control.dart"]
+        assert "class _RiveControlState extends State<RiveControl>" in content
 
     def test_contains_layout_control(self, ui_plan):
         gen = DartServiceGenerator()
         files = gen.generate(ui_plan)
-        content = files["rive_widget.dart"]
+        content = files["rive_control.dart"]
         assert "LayoutControl(" in content
         assert "control: widget.control," in content
 
     def test_contains_sdk_widget(self, ui_plan):
         gen = DartServiceGenerator()
         files = gen.generate(ui_plan)
-        content = files["rive_widget.dart"]
+        content = files["rive_control.dart"]
         assert "RiveAnimation(" in content
 
     def test_contains_typed_getters(self, ui_plan):
         gen = DartServiceGenerator()
         files = gen.generate(ui_plan)
-        content = files["rive_widget.dart"]
+        content = files["rive_control.dart"]
         assert "getBoxFit" in content
         assert "getAlignment" in content
         assert "getBool" in content
@@ -348,20 +348,20 @@ class TestDartUIControlGenerator:
     def test_contains_error_handler(self, ui_plan):
         gen = DartServiceGenerator()
         files = gen.generate(ui_plan)
-        content = files["rive_widget.dart"]
+        content = files["rive_control.dart"]
         assert "_handleError" in content
         assert 'triggerEvent("error"' in content
 
     def test_contains_flutter_widgets_import(self, ui_plan):
         gen = DartServiceGenerator()
         files = gen.generate(ui_plan)
-        content = files["rive_widget.dart"]
+        content = files["rive_control.dart"]
         assert "package:flutter/widgets.dart" in content
 
     def test_no_flet_widget_base_class(self, ui_plan):
         gen = DartServiceGenerator()
         files = gen.generate(ui_plan)
-        content = files["rive_widget.dart"]
+        content = files["rive_control.dart"]
         assert "FletWidget" not in content
 
     def test_dart_constructor_uses_camel_case_names(self):
@@ -391,7 +391,7 @@ class TestDartUIControlGenerator:
         )
         gen = DartServiceGenerator()
         files = gen.generate(plan)
-        content = files["web_view_widget.dart"]
+        content = files["web_view_control.dart"]
         # Constructor args must use camelCase Dart names
         assert "initialUrl: initialUrl," in content
         assert "debuggingEnabled: debuggingEnabled," in content
@@ -521,7 +521,7 @@ class TestSubControlGeneration:
         """Dart StatefulWidget should be generated for sub-control."""
         gen = DartServiceGenerator()
         files = gen.generate(slidable_plan)
-        content = files["slidable_widget.dart"]
+        content = files["slidable_control.dart"]
         assert "class ActionPaneWidget extends StatefulWidget" in content
         assert "_ActionPaneWidgetState" in content
         assert "ActionPane(" in content
@@ -596,7 +596,7 @@ class TestWidgetFamilyGeneration:
         """Dart file should contain a switch with all variant cases."""
         gen = DartServiceGenerator()
         files = gen.generate(family_plan)
-        content = files["spin_kit_widget.dart"]
+        content = files["spin_kit_control.dart"]
         assert 'case "circle":' in content
         assert 'case "hour_glass":' in content
         assert 'case "wave":' in content
@@ -608,14 +608,14 @@ class TestWidgetFamilyGeneration:
         """Dart switch should have a default case."""
         gen = DartServiceGenerator()
         files = gen.generate(family_plan)
-        content = files["spin_kit_widget.dart"]
+        content = files["spin_kit_control.dart"]
         assert "default:" in content
 
     def test_dart_family_shared_args(self, family_plan):
         """Each variant should receive the shared args."""
         gen = DartServiceGenerator()
         files = gen.generate(family_plan)
-        content = files["spin_kit_widget.dart"]
+        content = files["spin_kit_control.dart"]
         assert "color: color" in content
         assert "size: size" in content
 
@@ -706,9 +706,9 @@ class TestSiblingWidgetGeneration:
         """Each sibling should get its own Dart widget file."""
         gen = DartServiceGenerator()
         files = gen.generate(sibling_plan)
-        assert "linear_percent_indicator_widget.dart" in files
-        content = files["linear_percent_indicator_widget.dart"]
-        assert "class LinearPercentIndicatorWidget extends StatefulWidget" in content
+        assert "linear_percent_indicator_control.dart" in files
+        content = files["linear_percent_indicator_control.dart"]
+        assert "class LinearPercentIndicatorControl extends StatefulWidget" in content
         assert "LinearPercentIndicator(" in content
 
     def test_sibling_extension_dart_registers_all(self, sibling_plan):
@@ -717,10 +717,12 @@ class TestSiblingWidgetGeneration:
         files = gen.generate(sibling_plan)
         assert "extension.dart" in files
         content = files["extension.dart"]
+        assert "class Extension extends FletExtension" in content
+        assert "createWidget" in content
         assert '"CircularPercentIndicator"' in content
         assert '"LinearPercentIndicator"' in content
-        assert "CircularPercentIndicatorWidget(control: control)" in content
-        assert "LinearPercentIndicatorWidget(control: control)" in content
+        assert "CircularPercentIndicatorControl(control: control)" in content
+        assert "LinearPercentIndicatorControl(control: control)" in content
 
     def test_sibling_init_exports_all(self, sibling_plan):
         """__init__.py should export all sibling controls."""

@@ -283,13 +283,10 @@ class GenerationPipeline:
         python_pkg_dir = project_dir / "src" / package_name
         dart_src_dir = project_dir / "src" / "flutter" / package_name / "lib" / "src"
 
-        dart_lib_dir = project_dir / "src" / "flutter" / package_name / "lib"
-
         for filename, content in all_files.items():
-            if filename == "extension.dart":
-                # extension.dart lives at lib/extension.dart (not lib/src/)
-                target = dart_lib_dir / filename
-            elif filename.endswith(".dart"):
+            if filename.endswith(".dart"):
+                # All Dart files (including extension.dart) live in lib/src/.
+                # lib/{package}.dart re-exports lib/src/extension.dart.
                 target = dart_src_dir / filename
             else:
                 target = python_pkg_dir / filename

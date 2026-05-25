@@ -28,22 +28,28 @@ class DartServiceGenerator(CodeGenerator):
             Mapping of filename to generated Dart source code.
         """
         control_snake = plan.control_name_snake or camel_to_snake(plan.control_name)
-        service_type = "Service" if plan.base_class == "ft.Service" else "Widget"
-        filename = f"{control_snake}_{service_type.lower()}.dart"
+        is_service = plan.base_class == "ft.Service"
+        service_type = "Service" if is_service else "Widget"
+        # UI controls follow the official Flet convention: the widget class is
+        # ``{Control}Control`` in ``{snake}_control.dart``, registered via
+        # ``Extension.createWidget``. Services use ``{Control}Service``.
+        filename = (
+            f"{control_snake}_service.dart" if is_service else f"{control_snake}_control.dart"
+        )
 
         # UI controls use StatefulWidget + LayoutControl pattern
-        if service_type == "Widget":
+        if not is_service:
             files: dict[str, str] = {filename: self._generate_ui_control(plan, control_snake)}
 
-            # Generate sibling widget Dart files
+            # Generate sibling control Dart files
             for sibling in plan.sibling_widgets:
                 sib_snake = sibling.control_name_snake or camel_to_snake(sibling.control_name)
-                sib_file = f"{sib_snake}_widget.dart"
+                sib_file = f"{sib_snake}_control.dart"
                 files[sib_file] = self._generate_sibling_widget(sibling, plan)
 
-            # Generate extension.dart when siblings exist
-            if plan.sibling_widgets:
-                files["extension.dart"] = self._generate_extension_dart(plan)
+            # Always (re)generate extension.dart so the exported entry-point
+            # matches the generated control/sibling class names.
+            files["extension.dart"] = self._generate_extension_dart(plan)
 
             return files
 
@@ -147,8 +153,8 @@ class DartServiceGenerator(CodeGenerator):
         Returns:
             Complete Dart source code string.
         """
-        widget_class = f"{plan.control_name}Widget"
-        state_class = f"_{plan.control_name}WidgetState"
+        widget_class = f"{plan.control_name}Control"
+        state_class = f"_{plan.control_name}ControlState"
         sdk_class = plan.dart_main_class or plan.control_name
         lines: list[str] = []
 
@@ -280,8 +286,8 @@ class DartServiceGenerator(CodeGenerator):
 
     def _generate_sibling_widget(self, sibling: SiblingWidgetPlan, plan: GenerationPlan) -> str:
         """Generate a standalone StatefulWidget Dart file for a sibling widget."""
-        widget_class = f"{sibling.control_name}Widget"
-        state_class = f"_{sibling.control_name}WidgetState"
+        widget_class = f"{sibling.control_name}Control"
+        state_class = f"_{sibling.control_name}ControlState"
         sdk_class = sibling.dart_class_name
         needs_material = any(
             "Theme.of(context)" in (p.dart_getter or "") for p in sibling.properties
@@ -367,29 +373,38 @@ class DartServiceGenerator(CodeGenerator):
         return "\n".join(lines)
 
     def _generate_extension_dart(self, plan: GenerationPlan) -> str:
-        """Generate extension.dart that registers main + sibling widgets."""
+        """Generate ``extension.dart`` registering the main + sibling controls.
+
+        Follows the official Flet convention: a ``FletExtension`` subclass that
+        maps ``control.type`` to the matching ``{Control}Control`` widget via
+        ``createWidget``. Lives at ``lib/src/extension.dart`` and is re-exported
+        by ``lib/{package}.dart``.
+        """
         control_snake = plan.control_name_snake or camel_to_snake(plan.control_name)
         lines: list[str] = []
 
-        # Imports
+        # Imports (relative to lib/src/)
         lines.append("import 'package:flet/flet.dart';")
         lines.append("import 'package:flutter/widgets.dart';")
-        lines.append(f"import 'src/{control_snake}_widget.dart';")
+        lines.append(f"import '{control_snake}_control.dart';")
         for sibling in plan.sibling_widgets:
             sib_snake = sibling.control_name_snake or camel_to_snake(sibling.control_name)
-            lines.append(f"import 'src/{sib_snake}_widget.dart';")
+            lines.append(f"import '{sib_snake}_control.dart';")
         lines.append("")
 
-        # createControl function
-        lines.append("Widget? createControl(Control control) {")
-        lines.append("  switch (control.type) {")
-        lines.append(f'    case "{plan.control_name}":')
-        lines.append(f"      return {plan.control_name}Widget(control: control);")
+        # FletExtension.createWidget dispatch
+        lines.append("class Extension extends FletExtension {")
+        lines.append("  @override")
+        lines.append("  Widget? createWidget(Key? key, Control control) {")
+        lines.append("    switch (control.type) {")
+        lines.append(f'      case "{plan.control_name}":')
+        lines.append(f"        return {plan.control_name}Control(control: control);")
         for sibling in plan.sibling_widgets:
-            lines.append(f'    case "{sibling.control_name}":')
-            lines.append(f"      return {sibling.control_name}Widget(control: control);")
-        lines.append("    default:")
-        lines.append("      return null;")
+            lines.append(f'      case "{sibling.control_name}":')
+            lines.append(f"        return {sibling.control_name}Control(control: control);")
+        lines.append("      default:")
+        lines.append("        return null;")
+        lines.append("    }")
         lines.append("  }")
         lines.append("}")
         lines.append("")
