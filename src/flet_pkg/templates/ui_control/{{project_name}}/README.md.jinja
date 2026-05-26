@@ -55,6 +55,11 @@ if __name__ == "__main__":
     ft.run(main)
 ```
 
+> **Testing a custom control:** run your app with `flet build <target>` (e.g.
+> `flet build macos`), not `flet run`. `flet run` uses Flet's prebuilt client,
+> which only knows the built-in controls, so a custom control renders as
+> *"Unknown control"*. See `about_pkg_flet.md` for the full workflow.
+
 ## Development
 
 ```bash

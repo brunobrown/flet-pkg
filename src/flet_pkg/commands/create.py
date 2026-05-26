@@ -330,7 +330,19 @@ def create(
     console.print()
     info_panel(
         "Next Steps",
-        f"cd {project_name}\nuv sync",
+        (
+            f"[b]1.[/b] cd {project_name} && uv sync\n"
+            f"[b]2.[/b] Review the generated Dart bridge — it's a working scaffold,\n"
+            f"   complete any TODOs before publishing:\n"
+            f"   src/flutter/{package_name}/lib/src/\n"
+            f"[b]3.[/b] Test it by [b]building[/b] the example app:\n"
+            f"   cd examples/{package_name}_example\n"
+            f"   uv sync && flet build <macos|windows|linux|apk|web>\n\n"
+            f"[warning]Use `flet build`, not `flet run`.[/warning] `flet run` launches Flet's\n"
+            "prebuilt client (built-in controls only), so a custom control shows\n"
+            '"Unknown control". `flet build` compiles the extension\'s Dart too.\n'
+            "See about_pkg_flet.md for the full guide."
+        ),
     )
 
 

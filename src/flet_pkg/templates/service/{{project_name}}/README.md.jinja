@@ -65,6 +65,11 @@ if __name__ == "__main__":
     ft.run(main)
 ```
 
+> **Testing a custom service:** run your app with `flet build <target>` (e.g.
+> `flet build macos`), not `flet run`. `flet run` uses Flet's prebuilt client,
+> which doesn't bundle this extension's Dart code, so the service won't run. See
+> `about_pkg_flet.md` for the full workflow.
+
 ## Development
 
 ```bash

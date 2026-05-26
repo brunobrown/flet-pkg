@@ -4,7 +4,7 @@
 
 **CLI tool to scaffold Flet extension packages.**
 
-Generates complete, ready-to-develop Flet extensions with Python + Flutter/Dart code, following **Flet 0.80.x+** patterns.
+Generates complete, ready-to-develop Flet extensions with Python + Flutter/Dart code, following **Flet 0.85.x+** patterns.
 
 !!! warning "Important: this tool does not perform miracles. 🙏😂"
 
@@ -29,7 +29,7 @@ Generates complete, ready-to-develop Flet extensions with Python + Flutter/Dart 
 - **Name conflict detection** — checks PyPI, GitHub, and the Flet SDK monorepo before creating, warns if the name already exists
 - **Complete project scaffolding** — Python package, Flutter package, tests, docs, examples
 - **Smart name derivation** — automatically derives project, package, and class names from the Flutter package name
-- **Flet 0.80.x+ patterns** — uses `@ft.control`, `ft.Service`, `ft.LayoutControl`, `invoke_method`, and `EventHandler`
+- **Flet 0.85.x+ patterns** — uses `@ft.control`, `ft.Service`, `ft.LayoutControl`, `_invoke_method`, and `EventHandler`
 - **AI refinement** — optional LLM-powered code improvement using the Architect/Editor pattern
 - **[MCP Server](mcp-server.md)** — expose scaffolding and analysis tools to AI agents via the Model Context Protocol
 

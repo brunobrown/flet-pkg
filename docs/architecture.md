@@ -4,8 +4,17 @@ How `flet-pkg` works internally.
 
 ## Overview
 
-```
-CLI (Typer) → Prompts (Rich) → Validators → Registry Check → Scaffolder (Jinja2) → Pipeline → AI Refine → Output
+```mermaid
+flowchart LR
+    A[CLI<br/>Typer] --> B[Prompts<br/>Rich]
+    B --> C[Validators]
+    C --> D[Registry<br/>Check]
+    D --> E[Scaffolder<br/>Jinja2]
+    E --> F[Pipeline]
+    F --> G{--ai-refine?}
+    G -->|yes| H[AI Refine]
+    G -->|no| I[Output]
+    H --> I[Output]
 ```
 
 ## Module structure
@@ -53,6 +62,95 @@ src/flet_pkg/
 └── templates/
     ├── service/             # Service extension template
     └── ui_control/          # UI Control extension template
+```
+
+## Data model
+
+Two aggregates flow through the pipeline: the **parser** produces a
+`DartPackageAPI` (a faithful view of the Dart source), and the **analyzer**
+transforms it into a `GenerationPlan` (what the generators emit). Both live in
+[`core/models.py`](api/models.md).
+
+```mermaid
+classDiagram
+    direction LR
+
+    class DartPackageAPI {
+        +list~DartClass~ classes
+        +list~DartEnum~ enums
+        +list~DartClass~ helper_classes
+        +list~DartMethod~ top_level_functions
+        +dict reexported_types
+    }
+    class DartClass {
+        +str name
+        +str parent_class
+        +str source_file
+        +list~DartMethod~ methods
+        +list~DartParam~ constructor_params
+    }
+    class DartMethod {
+        +str name
+        +str return_type
+        +bool is_static
+        +bool is_getter
+        +bool is_async
+    }
+    class DartParam {
+        +str name
+        +str dart_type
+        +bool required
+        +bool named
+    }
+    class DartEnum {
+        +str name
+        +list values
+    }
+    DartPackageAPI o-- DartClass
+    DartPackageAPI o-- DartEnum
+    DartClass o-- DartMethod
+    DartClass o-- DartParam : constructor_params
+    DartMethod o-- DartParam
+
+    class GenerationPlan {
+        +str control_name
+        +str base_class
+        +list~PropertyPlan~ properties
+        +list~MethodPlan~ main_methods
+        +list~EventPlan~ events
+        +list~SubModulePlan~ sub_modules
+        +list~EnumPlan~ enums
+    }
+    class MethodPlan {
+        +str python_name
+        +str return_type
+        +bool is_async
+        +bool dart_is_async
+        +bool is_static
+        +list~ParamPlan~ params
+    }
+    class PropertyPlan {
+        +str python_name
+        +str python_type
+        +str dart_getter
+    }
+    class EventPlan {
+        +str python_attr_name
+        +str event_class_name
+    }
+    class SubModulePlan {
+        +str module_name
+        +str class_name
+        +list~MethodPlan~ methods
+    }
+    GenerationPlan o-- PropertyPlan
+    GenerationPlan o-- MethodPlan
+    GenerationPlan o-- EventPlan
+    GenerationPlan o-- SubModulePlan
+    MethodPlan o-- ParamPlan
+    SubModulePlan o-- MethodPlan
+
+    DartPackageAPI ..> GenerationPlan : PackageAnalyzer.analyze()
 ```
 
 ## Key components
@@ -113,6 +211,24 @@ Orchestrates the full code generation flow:
 6. **Gap analysis** — computes coverage percentage
 7. **AI refine** (optional) — runs the Architect/Editor pattern for improvements
 
+```mermaid
+flowchart TD
+    DL[Download<br/>pub.dev or local] --> PA[Parse<br/>DartPackageAPI]
+    PA --> AN[Analyze<br/>GenerationPlan]
+    AN --> GEN[Generate<br/>5 generators]
+    GEN --> WR[Write files<br/>overwrite stubs]
+    WR --> GAP[Gap analysis<br/>coverage percent]
+    GAP --> REF{--ai-refine?}
+    REF -->|yes| AI[AI Refine<br/>Architect/Editor]
+    REF -->|no| OUT[Project ready]
+    AI --> OUT
+
+    PA -. produces .-> APIOBJ[(DartPackageAPI)]
+    AN -. produces .-> PLANOBJ[(GenerationPlan)]
+    APIOBJ -. consumed by .-> AN
+    PLANOBJ -. consumed by .-> GEN
+```
+
 ### Generators (`core/generators/`)
 
 Five specialized generators produce different parts of the output:
@@ -133,6 +249,16 @@ Optional LLM-powered code improvement using the **Architect/Editor** pattern:
 2. **Architect** agent — LLM reasons about WHAT to improve based on the gap report
 3. **Editor** agent — LLM produces search/replace edits (HOW to fix)
 4. **Validator** — checks syntax of edited files and retries on failure
+
+```mermaid
+flowchart LR
+    GA[Gap Analyzer<br/>DartPackageAPI vs GenerationPlan] --> R[(Gap report)]
+    R --> AR[Architect agent<br/>WHAT to improve]
+    AR --> ED[Editor agent<br/>search/replace edits]
+    ED --> V{Validator<br/>syntax OK?}
+    V -->|no, retry| ED
+    V -->|yes| DONE[Refined files]
+```
 
 Supports multiple providers: Ollama (local, free), Anthropic, OpenAI, Google.
 
