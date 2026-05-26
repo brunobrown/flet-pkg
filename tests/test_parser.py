@@ -1,6 +1,59 @@
 """Tests for the Dart source parser."""
 
-from flet_pkg.core.parser import _parse_class_methods
+from flet_pkg.core.parser import (
+    _is_example_app_file,
+    _parse_class_methods,
+    parse_dart_package_api,
+)
+
+
+class TestExampleAppFiltering:
+    """Demo/example app files shipped in lib/ must not yield control candidates."""
+
+    def test_detects_main_entrypoint(self):
+        assert _is_example_app_file("void main() {\n  runApp(const MyApp());\n}")
+        assert _is_example_app_file("Future<void> main() async {\n  runApp(App());\n}")
+
+    def test_ignores_library_file(self):
+        lib = "class Shimmer extends StatefulWidget {\n  const Shimmer({super.key});\n}"
+        assert not _is_example_app_file(lib)
+
+    def test_ignores_indented_main_method(self):
+        # A method named `main` inside a class is not a top-level entrypoint.
+        klass = "class Foo {\n  void main() {}\n}"
+        assert not _is_example_app_file(klass)
+
+    def test_skips_example_widgets_in_lib(self, tmp_path):
+        lib = tmp_path / "lib"
+        lib.mkdir()
+        (lib / "shimmer.dart").write_text(
+            "library shimmer;\n"
+            "import 'package:flutter/material.dart';\n"
+            "class Shimmer extends StatefulWidget {\n"
+            "  const Shimmer({super.key, required this.child});\n"
+            "  final Widget child;\n"
+            "  @override\n"
+            "  State<Shimmer> createState() => _ShimmerState();\n"
+            "}\n"
+        )
+        (lib / "main.dart").write_text(
+            "import 'package:flutter/material.dart';\n"
+            "void main() {\n  runApp(const MyApp());\n}\n"
+            "class MyApp extends StatelessWidget {\n"
+            "  const MyApp({super.key});\n"
+            "}\n"
+            "class MyHomePage extends StatefulWidget {\n"
+            "  const MyHomePage({super.key, required this.title});\n"
+            "  final String title;\n"
+            "  @override\n"
+            "  State<MyHomePage> createState() => _MyHomePageState();\n"
+            "}\n"
+        )
+        api = parse_dart_package_api(tmp_path, include_widgets=True)
+        names = {c.name for c in api.classes}
+        assert "Shimmer" in names
+        assert "MyApp" not in names
+        assert "MyHomePage" not in names
 
 
 class TestAnnotationFiltering:

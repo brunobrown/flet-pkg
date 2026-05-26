@@ -114,6 +114,12 @@ _INTERNAL_WIDGET_SUFFIXES = (
     "Utils",
 )
 
+# A top-level `main()` declaration marks a Dart file as an example/demo app
+# entrypoint (it bootstraps the app, usually via `runApp(...)`). Some packages
+# accidentally ship such a file inside `lib/` — its classes (e.g. MyApp,
+# MyHomePage) are NOT public API and must not be wrapped as Flet controls.
+_MAIN_ENTRYPOINT_RE = re.compile(r"^(?:void|Future(?:<void>)?)\s+main\s*\(", re.MULTILINE)
+
 # Dart keywords that the method regex might capture as a "return type"
 # when matching method calls inside method bodies (e.g. `await foo(`).
 _DART_KEYWORDS = frozenset(
@@ -1347,6 +1353,17 @@ def detect_extension_type(package_path: Path) -> str:
     return "service"
 
 
+def _is_example_app_file(content: str) -> bool:
+    """Return True if a ``lib/`` file is an example/demo app entrypoint.
+
+    Detected by a top-level ``main()`` declaration. Such files are not part of
+    the package's public API — their widgets (``MyApp``, ``MyHomePage``, …) must
+    not be parsed as control candidates. Real library files never define a
+    top-level ``main()``.
+    """
+    return bool(_MAIN_ENTRYPOINT_RE.search(content))
+
+
 def parse_dart_package_api(
     package_path: Path,
     strict: bool = False,
@@ -1379,6 +1396,11 @@ def parse_dart_package_api(
     for dart_file in lib_dir.rglob("*.dart"):
         content = dart_file.read_text(encoding="utf-8")
         relative_path = str(dart_file.relative_to(lib_dir))
+
+        # Skip example/demo app entrypoints accidentally shipped in lib/
+        # (e.g. shimmer's lib/main.dart with MyApp/MyHomePage).
+        if _is_example_app_file(content):
+            continue
 
         # Parse typedefs
         all_typedefs.update(_parse_typedefs(content))
