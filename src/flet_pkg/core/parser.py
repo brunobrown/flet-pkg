@@ -943,7 +943,7 @@ def _parse_class_methods(class_block: str, skip_filter: bool = True) -> list[Dar
     # Parse methods with parentheses: `Type name(params)` or `Type get/set name(params)`
     # Match up to the opening paren, then use balanced extraction for params.
     method_sig_re = re.compile(
-        r"(?:@[^\n]*\n)*"
+        r"(?:@[^\n]*\n\s*)*"
         r"(static\s+)?"
         r"(Future<.*?>|Future|void|String|bool|int|double|dynamic|"
         r"Map<.*?>|List<.*?>|Set<.*?>|\w+(?:\?)?)\s+"
@@ -957,9 +957,11 @@ def _parse_class_methods(class_block: str, skip_filter: bool = True) -> list[Dar
         if _is_inside_comment(class_block, m.start()):
             continue
 
-        # Skip @Deprecated or @visibleForTesting annotated methods
+        # Skip test-only / non-public methods: @Deprecated, @visibleForTesting,
+        # @protected. These are not part of the package's public API and break
+        # `flutter analyze` when called from generated bridge code.
         annotation_text = m.group(0)
-        if re.search(r"@[Dd]eprecated|@visibleForTesting", annotation_text):
+        if re.search(r"@[Dd]eprecated|@visibleForTesting|@protected", annotation_text):
             continue
 
         is_static = m.group(1) is not None
@@ -1017,7 +1019,7 @@ def _parse_class_methods(class_block: str, skip_filter: bool = True) -> list[Dar
 
     # Parse bare getters without parentheses: `Type get name { ... }` or `Type get name =>`
     getter_matches = re.finditer(
-        r"(?:@[^\n]*\n)*"
+        r"(?:@[^\n]*\n\s*)*"
         r"(static\s+)?"
         r"(Future<.*?>|Stream<.*?>|String|bool|int|double|dynamic|Map<.*?>|List<.*?>|\w+\??)\s+"
         r"get\s+(\w+)\s*(?:\{|=>)",
@@ -1169,7 +1171,7 @@ def _parse_top_level_functions(
 
     # Match top-level function declarations
     func_re = re.compile(
-        r"(?:@[^\n]*\n)*"
+        r"(?:@[^\n]*\n\s*)*"
         r"(static\s+)?"
         r"(Future<.*?>|Future|void|String|bool|int|double|dynamic|"
         r"Map<.*?>|List<.*?>|Set<.*?>|\w+(?:\?)?)\s+"
@@ -1200,9 +1202,9 @@ def _parse_top_level_functions(
         if _is_inside_string(content, m.start()):
             continue
 
-        # Check for @Deprecated or @visibleForTesting annotations
+        # Check for @Deprecated, @visibleForTesting or @protected annotations
         annotation_text = m.group(0)
-        if re.search(r"@[Dd]eprecated|@visibleForTesting", annotation_text):
+        if re.search(r"@[Dd]eprecated|@visibleForTesting|@protected", annotation_text):
             continue
 
         return_type = m.group(2)
@@ -1389,7 +1391,7 @@ def parse_dart_package_api(
 
         # Parse classes
         class_matches = re.finditer(
-            r"(?:@[^\n]*\n)*"
+            r"(?:@[^\n]*\n\s*)*"
             r"(?:abstract\s+)?class\s+(\w+)"
             r"(?:\s+extends\s+(\w+))?"
             r"(?:\s+with\s+[\w\s,]+)?"
