@@ -115,6 +115,7 @@ class MethodPlan:
     docstring: str = ""
     is_async: bool = True
     is_getter: bool = False
+    is_static: bool = False
     dart_original_name: str = ""
     dart_class_name: str = ""
 

@@ -1564,6 +1564,7 @@ class PackageAnalyzer:
             docstring=method.docstring,
             is_async=True,
             is_getter=method.is_getter,
+            is_static=method.is_static,
             dart_original_name=method.name,
             dart_class_name=dart_class_name,
         )

@@ -53,8 +53,21 @@ class DartServiceGenerator(CodeGenerator):
 
             return files
 
-        # Service path — unchanged
+        # Service path
         class_name = f"{plan.control_name}{service_type}"
+        main_class = plan.dart_main_class or plan.control_name
+
+        # Decide whether the SDK class must be instantiated. Instance (non-static)
+        # methods are dispatched on an instance; static methods on the class name.
+        all_methods = list(plan.main_methods)
+        for sub in plan.sub_modules:
+            all_methods.extend(sub.methods)
+        instance_var = f"_{main_class[0].lower()}{main_class[1:]}" if main_class else "_sdk"
+        needs_instance = any(
+            self._method_uses_instance(m, self._find_sub_module_for_method(m, plan))
+            for m in all_methods
+        )
+
         lines: list[str] = []
 
         # Imports
@@ -78,6 +91,8 @@ class DartServiceGenerator(CodeGenerator):
         lines.append("")
         lines.append("  bool _initialized = false;")
         lines.append("  bool _listenersSetup = false;")
+        if needs_instance:
+            lines.append(f"  final {main_class} {instance_var} = {main_class}();")
         lines.append("")
 
         # init()
@@ -118,13 +133,9 @@ class DartServiceGenerator(CodeGenerator):
         self._render_invoke_method(lines, plan)
 
         # Method implementations with real SDK calls
-        all_methods = list(plan.main_methods)
-        for sub in plan.sub_modules:
-            all_methods.extend(sub.methods)
-
         for method in all_methods:
             sub_module = self._find_sub_module_for_method(method, plan)
-            lines.extend(self._render_dart_method(method, plan, sub_module))
+            lines.extend(self._render_dart_method(method, plan, sub_module, instance_var))
             lines.append("")
 
         # _handleError
@@ -194,6 +205,10 @@ class DartServiceGenerator(CodeGenerator):
         # Read properties using typed getters
         if plan.properties:
             for prop in plan.properties:
+                # The "type" discriminator is read by the family-variant switch
+                # below; skip it here to avoid a duplicate local declaration.
+                if plan.widget_family_variants and prop.python_name == "type":
+                    continue
                 dart_var = _to_camel_case(prop.python_name)
                 if prop.dart_getter:
                     # Use the pre-computed typed getter from the analyzer
@@ -699,14 +714,19 @@ class DartServiceGenerator(CodeGenerator):
         method: MethodPlan,
         plan: GenerationPlan,
         sub_module: SubModulePlan | None,
+        instance_var: str = "",
     ) -> list[str]:
         """Render a single Dart method with a real SDK call."""
         lines: list[str] = []
         impl_name = _to_dart_method_name(method.dart_method_name)
 
-        # Determine SDK call path
+        # Determine SDK call path. Instance methods are dispatched on the
+        # instantiated SDK object; static methods (and namespaced sub-modules)
+        # are dispatched on the class/namespace path.
         if sub_module and sub_module.dart_sdk_accessor:
             sdk_accessor = sub_module.dart_sdk_accessor
+        elif not method.is_static and instance_var:
+            sdk_accessor = instance_var
         else:
             sdk_accessor = plan.dart_main_class or plan.control_name
 
@@ -844,6 +864,17 @@ class DartServiceGenerator(CodeGenerator):
             if method in sub.methods:
                 return sub
         return None
+
+    @staticmethod
+    def _method_uses_instance(method: MethodPlan, sub_module: SubModulePlan | None) -> bool:
+        """Whether a method is dispatched on an SDK instance (vs a static path).
+
+        A method needs an instance when it is non-static and not routed through a
+        namespaced sub-module accessor (those resolve to a static path).
+        """
+        if method.is_static:
+            return False
+        return not (sub_module and sub_module.dart_sdk_accessor)
 
 
 def _to_dart_method_name(snake_name: str) -> str:
