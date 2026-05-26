@@ -211,10 +211,10 @@ class DartServiceGenerator(CodeGenerator):
                     continue
                 dart_var = _to_camel_case(prop.python_name)
                 if prop.dart_getter:
-                    # Use the pre-computed typed getter from the analyzer
-                    if prop.dart_getter.startswith("widget.") or prop.dart_getter.startswith(
-                        "buildWidget"
-                    ):
+                    # Use the pre-computed typed getter from the analyzer.
+                    # Getters reference `control.` (incl. buildWidget/buildWidgets);
+                    # rewrite to the State's `widget.control.` receiver.
+                    if prop.dart_getter.startswith("widget."):
                         getter_expr = prop.dart_getter
                     else:
                         getter_expr = prop.dart_getter.replace("control.", "widget.control.")
@@ -345,8 +345,6 @@ class DartServiceGenerator(CodeGenerator):
                 dart_var = _to_camel_case(prop.python_name)
                 if prop.dart_getter:
                     getter_expr = prop.dart_getter.replace("control.", "widget.control.")
-                    if getter_expr.startswith("buildWidget"):
-                        getter_expr = prop.dart_getter
                     lines.append(f"      final {dart_var} = {getter_expr};")
                 else:
                     lines.append(
@@ -455,9 +453,7 @@ class DartServiceGenerator(CodeGenerator):
         for prop in sub.properties:
             dart_var = _to_camel_case(prop.python_name)
             if prop.dart_getter:
-                if prop.dart_getter.startswith("widget.") or prop.dart_getter.startswith(
-                    "buildWidget"
-                ):
+                if prop.dart_getter.startswith("widget."):
                     getter_expr = prop.dart_getter
                 else:
                     getter_expr = prop.dart_getter.replace("control.", "widget.control.")

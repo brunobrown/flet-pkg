@@ -835,14 +835,17 @@ class PackageAnalyzer:
             if is_list_sub_control:
                 python_type = f"list[{sc_name}]"
                 default_value = "field(default_factory=list)"
-                dart_getter = f'buildWidgets("{python_name}")'
+                # buildWidgets/buildWidget are extension methods on Control
+                # (flet/src/extensions/control.dart) — emit with a `control.`
+                # receiver so the generator rewrites it to `widget.control.`.
+                dart_getter = f'control.buildWidgets("{python_name}")'
             else:
                 is_nullable = param.dart_type.endswith("?")
                 python_type = f"{sc_name} | None" if is_nullable else sc_name
                 default_value = "None"
                 if "None" not in python_type:
                     python_type = f"{python_type} | None"
-                dart_getter = f'buildWidget("{python_name}")'
+                dart_getter = f'control.buildWidget("{python_name}")'
             return PropertyPlan(
                 python_name=python_name,
                 python_type=python_type,

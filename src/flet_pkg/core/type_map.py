@@ -92,7 +92,7 @@ _FLET_DART_GETTER_MAP: dict[str, str] = {
     "ft.Rect": 'control.getRect("{name}")',
     "ft.Color": 'control.getString("{name}")',
     "ft.Number": 'control.getDouble("{name}")',
-    "ft.Control": 'buildWidget("{name}")',
+    "ft.Control": 'control.buildWidget("{name}")',
     "ft.TextStyle": 'control.getTextStyle("{name}", Theme.of(context))',
     "bool": 'control.getBool("{name}", false)!',
     "int": 'control.getInt("{name}")',
@@ -306,11 +306,11 @@ def get_flet_dart_getter(python_type: str, prop_name: str) -> str:
     # Strip nullable and list wrappers for lookup
     base = python_type.replace(" | None", "").strip()
 
-    # Handle list types: list[ft.Control] → buildWidgets("{name}")
+    # Handle list types: list[ft.Control] → control.buildWidgets("{name}")
     if base.startswith("list["):
         inner = base[5:-1]
         if inner == "ft.Control":
-            return f'buildWidgets("{prop_name}")'
+            return f'control.buildWidgets("{prop_name}")'
         return f'control.getString("{prop_name}")'
 
     template = _FLET_DART_GETTER_MAP.get(base, 'control.getString("{name}")')

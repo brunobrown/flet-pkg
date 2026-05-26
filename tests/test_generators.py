@@ -494,14 +494,14 @@ class TestSubControlGeneration:
                     python_type="ActionPane | None",
                     default_value="None",
                     dart_name="startActionPane",
-                    dart_getter='buildWidget("start_action_pane")',
+                    dart_getter='control.buildWidget("start_action_pane")',
                 ),
                 PropertyPlan(
                     python_name="child",
                     python_type="ft.Control | None",
                     default_value="None",
                     dart_name="child",
-                    dart_getter='buildWidget("child")',
+                    dart_getter='control.buildWidget("child")',
                 ),
                 PropertyPlan(
                     python_name="enabled",
@@ -528,7 +528,7 @@ class TestSubControlGeneration:
                             python_type="list[ft.Control]",
                             default_value="field(default_factory=list)",
                             dart_name="children",
-                            dart_getter='buildWidgets("children")',
+                            dart_getter='control.buildWidgets("children")',
                         ),
                     ],
                     parent_property="start_action_pane",
@@ -564,6 +564,20 @@ class TestSubControlGeneration:
         assert "class ActionPaneWidget extends StatefulWidget" in content
         assert "_ActionPaneWidgetState" in content
         assert "ActionPane(" in content
+
+    def test_dart_build_widget_has_receiver(self, slidable_plan):
+        """buildWidget/buildWidgets must be called on the State's widget.control.
+
+        They are extension methods on Control (flet/src/extensions/control.dart),
+        so a bare `buildWidget("child")` is undefined and breaks `flutter analyze`.
+        """
+        gen = DartServiceGenerator()
+        content = gen.generate(slidable_plan)["slidable_control.dart"]
+        assert 'widget.control.buildWidget("child")' in content
+        assert 'widget.control.buildWidgets("children")' in content
+        # No bare (receiver-less) calls.
+        assert "= buildWidget(" not in content
+        assert "= buildWidgets(" not in content
 
     def test_init_exports_sub_controls(self, slidable_plan):
         """__init__.py should export sub-control classes."""

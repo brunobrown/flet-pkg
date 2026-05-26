@@ -167,7 +167,7 @@ class TestGetFletDartGetter:
 
     def test_control(self):
         result = get_flet_dart_getter("ft.Control", "child")
-        assert result == 'buildWidget("child")'
+        assert result == 'control.buildWidget("child")'
 
     def test_bool(self):
         result = get_flet_dart_getter("bool", "enabled")
@@ -183,7 +183,7 @@ class TestGetFletDartGetter:
 
     def test_list_control(self):
         result = get_flet_dart_getter("list[ft.Control]", "children")
-        assert result == 'buildWidgets("children")'
+        assert result == 'control.buildWidgets("children")'
 
     def test_unknown_fallback(self):
         result = get_flet_dart_getter("SomeCustomType", "custom")
