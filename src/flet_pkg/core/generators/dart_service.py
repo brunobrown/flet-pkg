@@ -745,24 +745,19 @@ class DartServiceGenerator(CodeGenerator):
             # Build null check condition for required params
             required_params = [p for p in method.params if not p.is_optional]
 
-            # Build SDK call arguments (use "name: name" for named params)
-            # Required params are passed directly; optional params use
-            # conditional forwarding so they are only sent when non-null.
+            # Build SDK call arguments. Named params (required or optional)
+            # are forwarded as "name: var"; positional params as "var", in
+            # declaration order. Optional values are extracted as nullable
+            # from the args map and forwarded directly: a collection-`if`
+            # (`if (x != null) name: x`) is NOT valid inside a Dart call
+            # argument list, and optional named SDK params are nullable.
             sdk_arg_parts = []
-            optional_parts = []
             for p in method.params:
                 v = _safe_dart_var(p.dart_name)
-                if p.is_optional:
-                    if p.is_named:
-                        optional_parts.append((p.dart_name, v))
+                if p.is_named:
+                    sdk_arg_parts.append(f"{p.dart_name}: {v}")
                 else:
-                    if p.is_named:
-                        sdk_arg_parts.append(f"{p.dart_name}: {v}")
-                    else:
-                        sdk_arg_parts.append(v)
-            # Add optional named params with null check
-            for orig_name, safe_name in optional_parts:
-                sdk_arg_parts.append(f"if ({safe_name} != null) {orig_name}: {safe_name}")
+                    sdk_arg_parts.append(v)
             sdk_args = ", ".join(sdk_arg_parts)
 
             if required_params:
