@@ -734,6 +734,11 @@ class DartServiceGenerator(CodeGenerator):
         original_name = method.dart_original_name or method.python_name
         dart_return = method.return_type
 
+        # Only await Future-returning SDK calls. Awaiting a synchronous method
+        # or getter raises await_only_futures / use_of_void_result in
+        # `flutter analyze`.
+        aw = "await " if method.dart_is_async else ""
+
         if method.params:
             lines.append(f"  Future<String?> {impl_name}(Map<String, dynamic> args) async {{")
             # Extract arguments using python_name as key (matches what Python sends)
@@ -768,19 +773,19 @@ class DartServiceGenerator(CodeGenerator):
 
                 # Determine return handling
                 if dart_return == "None":
-                    lines.append(f"      await {sdk_accessor}.{original_name}({sdk_args});")
+                    lines.append(f"      {aw}{sdk_accessor}.{original_name}({sdk_args});")
                     lines.append("    }")
                     lines.append("    return null;")
                 elif "bool" in dart_return.lower():
                     lines.append(
-                        f"      final result = await {sdk_accessor}.{original_name}({sdk_args});"
+                        f"      final result = {aw}{sdk_accessor}.{original_name}({sdk_args});"
                     )
                     lines.append("      return result.toString();")
                     lines.append("    }")
                     lines.append("    return null;")
                 else:
                     lines.append(
-                        f"      final result = await {sdk_accessor}.{original_name}({sdk_args});"
+                        f"      final result = {aw}{sdk_accessor}.{original_name}({sdk_args});"
                     )
                     lines.append("      return result?.toString();")
                     lines.append("    }")
@@ -788,11 +793,11 @@ class DartServiceGenerator(CodeGenerator):
             else:
                 # All params are optional - call directly
                 if dart_return == "None":
-                    lines.append(f"    await {sdk_accessor}.{original_name}({sdk_args});")
+                    lines.append(f"    {aw}{sdk_accessor}.{original_name}({sdk_args});")
                     lines.append("    return null;")
                 else:
                     lines.append(
-                        f"    final result = await {sdk_accessor}.{original_name}({sdk_args});"
+                        f"    final result = {aw}{sdk_accessor}.{original_name}({sdk_args});"
                     )
                     lines.append("    return result?.toString();")
         else:
@@ -807,18 +812,18 @@ class DartServiceGenerator(CodeGenerator):
             )
 
             if dart_return == "None":
-                lines.append(f"    await {call};")
+                lines.append(f"    {aw}{call};")
                 lines.append("    return null;")
             elif "bool" in dart_return.lower():
-                lines.append(f"    final result = await {call};")
+                lines.append(f"    final result = {aw}{call};")
                 lines.append("    return result.toString();")
             elif dart_return in ("str", "str | None"):
-                lines.append(f"    return await {call};")
+                lines.append(f"    return {aw}{call};")
             elif dart_return.startswith("dict") or dart_return.startswith("list"):
-                lines.append(f"    final result = await {call};")
+                lines.append(f"    final result = {aw}{call};")
                 lines.append("    return jsonEncode(result);")
             else:
-                lines.append(f"    final result = await {call};")
+                lines.append(f"    final result = {aw}{call};")
                 lines.append("    return result?.toString();")
 
         lines.append("  }")

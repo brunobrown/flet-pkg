@@ -114,6 +114,13 @@ class MethodPlan:
     return_type: str = "None"
     docstring: str = ""
     is_async: bool = True
+    """The generated Python wrapper is always async (it calls ``_invoke_method``)."""
+    dart_is_async: bool = True
+    """Whether the underlying Dart SDK call returns a ``Future`` and must be awaited.
+
+    ``False`` for synchronous SDK methods/getters — awaiting those triggers
+    ``await_only_futures`` / ``use_of_void_result`` in ``flutter analyze``.
+    """
     is_getter: bool = False
     is_static: bool = False
     dart_original_name: str = ""

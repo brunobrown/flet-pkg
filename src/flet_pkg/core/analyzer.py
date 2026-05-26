@@ -1527,7 +1527,7 @@ class PackageAnalyzer:
             dart_prefix,
         )
 
-        python_return, _dart_is_async = map_return_type(method.return_type)
+        python_return, dart_is_async = map_return_type(method.return_type)
         # Sanitize return type: replace unknown Dart classes with dict | None
         python_return = _sanitize_python_type(python_return, self._known_types)
 
@@ -1563,6 +1563,7 @@ class PackageAnalyzer:
             return_type=python_return,
             docstring=method.docstring,
             is_async=True,
+            dart_is_async=dart_is_async,
             is_getter=method.is_getter,
             is_static=method.is_static,
             dart_original_name=method.name,

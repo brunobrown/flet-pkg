@@ -265,6 +265,45 @@ class TestDartServiceGenerator:
         content = files["one_signal_service.dart"]
         assert "package:onesignal_flutter/onesignal_flutter.dart" in content
 
+    def test_sync_method_is_not_awaited(self):
+        """Synchronous (non-Future) SDK calls must not be awaited.
+
+        Awaiting them triggers await_only_futures / use_of_void_result in
+        ``flutter analyze`` (regression for the listener/void await bug).
+        """
+        plan = GenerationPlan(
+            control_name="SecureStorage",
+            package_name="flet_secure_storage",
+            base_class="ft.Service",
+            flutter_package="flutter_secure_storage",
+            dart_import="package:flutter_secure_storage/flutter_secure_storage.dart",
+            dart_main_class="FlutterSecureStorage",
+            main_methods=[
+                MethodPlan(
+                    python_name="register_listener",
+                    dart_method_name="register_listener",
+                    dart_original_name="registerListener",
+                    params=[ParamPlan(python_name="key", python_type="str", dart_name="key")],
+                    return_type="None",
+                    is_async=True,
+                    dart_is_async=False,  # SDK method returns void (synchronous)
+                ),
+                MethodPlan(
+                    python_name="write",
+                    dart_method_name="write",
+                    dart_original_name="write",
+                    params=[ParamPlan(python_name="key", python_type="str", dart_name="key")],
+                    return_type="None",
+                    is_async=True,
+                    dart_is_async=True,  # SDK method returns Future<void>
+                ),
+            ],
+        )
+        content = DartServiceGenerator().generate(plan)["secure_storage_service.dart"]
+        assert "_flutterSecureStorage.registerListener(key);" in content
+        assert "await _flutterSecureStorage.registerListener" not in content
+        assert "await _flutterSecureStorage.write(key);" in content
+
 
 class TestDartUIControlGenerator:
     """Tests for StatefulWidget generation for UI controls."""
