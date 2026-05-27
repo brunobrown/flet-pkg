@@ -218,6 +218,7 @@ class DartServiceGenerator(CodeGenerator):
                         getter_expr = prop.dart_getter
                     else:
                         getter_expr = prop.dart_getter.replace("control.", "widget.control.")
+                    getter_expr = _coalesce_child_getter(getter_expr, prop.dart_type)
                     lines.append(f"      final {dart_var} = {getter_expr};")
                 else:
                     # Fallback to getString
@@ -345,6 +346,7 @@ class DartServiceGenerator(CodeGenerator):
                 dart_var = _to_camel_case(prop.python_name)
                 if prop.dart_getter:
                     getter_expr = prop.dart_getter.replace("control.", "widget.control.")
+                    getter_expr = _coalesce_child_getter(getter_expr, prop.dart_type)
                     lines.append(f"      final {dart_var} = {getter_expr};")
                 else:
                     lines.append(
@@ -457,6 +459,7 @@ class DartServiceGenerator(CodeGenerator):
                     getter_expr = prop.dart_getter
                 else:
                     getter_expr = prop.dart_getter.replace("control.", "widget.control.")
+                getter_expr = _coalesce_child_getter(getter_expr, prop.dart_type)
                 lines.append(f"      final {dart_var} = {getter_expr};")
             else:
                 lines.append(
@@ -883,6 +886,20 @@ def _to_camel_case(snake_name: str) -> str:
     """Convert snake_case to camelCase."""
     parts = snake_name.split("_")
     return parts[0] + "".join(p.capitalize() for p in parts[1:])
+
+
+def _coalesce_child_getter(getter_expr: str, dart_type: str) -> str:
+    """Add a ``?? const SizedBox.shrink()`` fallback to a single-child getter.
+
+    ``Control.buildWidget()`` returns ``Widget?``; passing it to a non-nullable
+    SDK constructor parameter raises ``argument_type_not_assignable`` in
+    ``flutter analyze``. When the Dart param is nullable (``Widget?``) the value
+    is forwarded as-is. List children (``buildWidgets``) already return a
+    non-null ``List<Widget>`` and are left untouched.
+    """
+    if "buildWidget(" in getter_expr and not dart_type.endswith("?"):
+        return f"{getter_expr} ?? const SizedBox.shrink()"
+    return getter_expr
 
 
 _DART_RESERVED = frozenset(

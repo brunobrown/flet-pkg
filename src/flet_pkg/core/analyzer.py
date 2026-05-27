@@ -853,6 +853,7 @@ class PackageAnalyzer:
                 docstring="",
                 dart_name=param.name,
                 dart_getter=dart_getter,
+                dart_type=param.dart_type,
             )
 
         # Convert to Python property (Flet-aware for ui_control)
@@ -889,6 +890,7 @@ class PackageAnalyzer:
             docstring="",
             dart_name=param.name,
             dart_getter=dart_getter,
+            dart_type=param.dart_type,
         )
 
     def _detect_sub_controls(

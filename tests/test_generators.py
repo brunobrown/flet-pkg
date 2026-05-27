@@ -587,6 +587,47 @@ class TestSubControlGeneration:
         assert "from flet_slidable.slidable import ActionPane" in content
         assert '"ActionPane"' in content
 
+    def test_child_nullability_coalesce(self):
+        """A non-nullable child param must coalesce buildWidget() with a fallback.
+
+        buildWidget() returns Widget?, so feeding a `required Widget` param needs
+        `?? const SizedBox.shrink()`. A nullable (Widget?) param is forwarded
+        as-is; list children (buildWidgets) are never coalesced.
+        """
+        plan = GenerationPlan(
+            control_name="Wrapper",
+            package_name="flet_wrapper",
+            base_class="ft.LayoutControl",
+            flutter_package="wrapper",
+            dart_import="package:wrapper/wrapper.dart",
+            dart_main_class="Wrapper",
+            properties=[
+                PropertyPlan(
+                    python_name="child",
+                    python_type="ft.Control | None",
+                    default_value="None",
+                    dart_name="child",
+                    dart_getter='control.buildWidget("child")',
+                    dart_type="Widget",  # required Widget → must coalesce
+                ),
+                PropertyPlan(
+                    python_name="placeholder",
+                    python_type="ft.Control | None",
+                    default_value="None",
+                    dart_name="placeholder",
+                    dart_getter='control.buildWidget("placeholder")',
+                    dart_type="Widget?",  # nullable → forward as-is
+                ),
+            ],
+        )
+        content = DartServiceGenerator().generate(plan)["wrapper_control.dart"]
+        assert (
+            'final child = widget.control.buildWidget("child") ?? const SizedBox.shrink();'
+            in content
+        )
+        assert 'final placeholder = widget.control.buildWidget("placeholder");' in content
+        assert 'placeholder") ?? const SizedBox.shrink()' not in content
+
 
 # ---------------------------------------------------------------------------
 # Widget Family generation tests

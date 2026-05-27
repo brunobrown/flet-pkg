@@ -159,6 +159,13 @@ class PropertyPlan:
     Example: ``control.getAlignment("alignment")``.
     Populated by the analyzer for ``ui_control`` extensions.
     """
+    dart_type: str = ""
+    """Original Dart constructor-param type (e.g. ``Widget``, ``Widget?``).
+
+    Used by the Dart widget generator to decide nullability — e.g. whether a
+    ``buildWidget(...)`` child (which returns ``Widget?``) must be coalesced
+    with a fallback before being passed to a non-nullable SDK parameter.
+    """
 
 
 @dataclass
