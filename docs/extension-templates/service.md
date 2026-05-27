@@ -55,9 +55,21 @@ The generated Flutter code uses:
 - `control.addInvokeMethodListener()` to handle method calls from Python
 - `control.triggerEvent()` to send events back to Python
 
+## Communication
+
+Python and Dart talk through the Flet engine — commands flow one way, events the
+other:
+
+```mermaid
+flowchart LR
+    Py["Python control<br/>ft.Service"] -- "_invoke_method() · command" --> Eng(["Flet Engine<br/>platform channel"])
+    Eng --> Dart["Dart service<br/>extends FletService"]
+    Dart -- "triggerEvent() · event" --> Eng -- "on_xxx handler" --> Py
+```
+
 ## Flet patterns
 
-The Service template follows Flet 0.80.x+ extension patterns:
+The Service template follows Flet 0.85.x+ extension patterns:
 
 - **setuptools** build system (required for `package-data` Flutter bundling)
 - Python and Dart code live side-by-side under `src/`

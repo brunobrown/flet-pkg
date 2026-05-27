@@ -23,3 +23,13 @@ nav:
   - API Reference: api-reference.md
   - Examples: examples.md
   - Changelog: changelog.md
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - pymdownx.details
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format

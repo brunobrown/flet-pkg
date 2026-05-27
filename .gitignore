@@ -239,5 +239,11 @@ poetry.toml
 # LSP config files
 pyrightconfig.json
 
+# AI
 .claude
+.codex
+.agents
+
+# Temporary files
+*.temp
 tmp

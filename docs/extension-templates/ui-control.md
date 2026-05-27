@@ -57,6 +57,19 @@ The generated Flutter code uses:
 - `control.triggerEvent()` to send events back to Python
 - A Flutter `Widget` that renders the actual UI
 
+## Communication
+
+Commands flow Python → Dart, events flow Dart → Python, and properties sync on
+`page.update()` — all through the Flet engine:
+
+```mermaid
+flowchart LR
+    Py["Python control<br/>ft.LayoutControl"] -- "_invoke_method() · command" --> Eng(["Flet Engine<br/>platform channel"])
+    Eng --> Dart["Dart widget<br/>StatelessWidget"]
+    Dart -- "triggerEvent() · event" --> Eng -- "on_xxx handler" --> Py
+    Py -. "property · control.getXxx()" .-> Eng -.-> Dart
+```
+
 ## Key difference from Service
 
 | | Service | UI Control |

@@ -4,6 +4,8 @@ Produces the Dart service (or widget) implementation that handles
 method dispatch from Python, event listener setup, and real SDK calls.
 """
 
+import re
+
 from flet_pkg.core.generators.base import CodeGenerator
 from flet_pkg.core.models import (
     GenerationPlan,
@@ -28,31 +30,65 @@ class DartServiceGenerator(CodeGenerator):
             Mapping of filename to generated Dart source code.
         """
         control_snake = plan.control_name_snake or camel_to_snake(plan.control_name)
-        service_type = "Service" if plan.base_class == "ft.Service" else "Widget"
-        filename = f"{control_snake}_{service_type.lower()}.dart"
+        is_service = plan.base_class == "ft.Service"
+        service_type = "Service" if is_service else "Widget"
+        # UI controls follow the official Flet convention: the widget class is
+        # ``{Control}Control`` in ``{snake}_control.dart``, registered via
+        # ``Extension.createWidget``. Services use ``{Control}Service``.
+        filename = (
+            f"{control_snake}_service.dart" if is_service else f"{control_snake}_control.dart"
+        )
 
         # UI controls use StatefulWidget + LayoutControl pattern
-        if service_type == "Widget":
+        if not is_service:
             files: dict[str, str] = {filename: self._generate_ui_control(plan, control_snake)}
 
-            # Generate sibling widget Dart files
+            # Generate sibling control Dart files
             for sibling in plan.sibling_widgets:
                 sib_snake = sibling.control_name_snake or camel_to_snake(sibling.control_name)
-                sib_file = f"{sib_snake}_widget.dart"
+                sib_file = f"{sib_snake}_control.dart"
                 files[sib_file] = self._generate_sibling_widget(sibling, plan)
 
-            # Generate extension.dart when siblings exist
-            if plan.sibling_widgets:
-                files["extension.dart"] = self._generate_extension_dart(plan)
+            # Always (re)generate extension.dart so the exported entry-point
+            # matches the generated control/sibling class names.
+            files["extension.dart"] = self._generate_extension_dart(plan)
 
             return files
 
-        # Service path — unchanged
+        # Service path
         class_name = f"{plan.control_name}{service_type}"
+        main_class = plan.dart_main_class or plan.control_name
+
+        # Decide whether the SDK class must be instantiated. Instance (non-static)
+        # methods are dispatched on an instance; static methods on the class name.
+        all_methods = list(plan.main_methods)
+        for sub in plan.sub_modules:
+            all_methods.extend(sub.methods)
+        instance_var = f"_{main_class[0].lower()}{main_class[1:]}" if main_class else "_sdk"
+        # A main-class event (no sub-module accessor) is typically an instance
+        # stream getter (e.g. Battery().onBatteryStateChanged) → needs an instance.
+        has_main_class_event = any(not e.dart_sdk_accessor for e in plan.events)
+        needs_instance = (
+            any(
+                self._method_uses_instance(m, self._find_sub_module_for_method(m, plan))
+                for m in all_methods
+            )
+            or has_main_class_event
+        )
+
         lines: list[str] = []
 
+        # `dart:convert` is only used for jsonEncode (no-param methods returning
+        # dict/list) and jsonDecode (event fields of type "dict"). Import it
+        # only when actually used to avoid an `unused_import` warning.
+        needs_json = any(
+            not m.params and (m.return_type.startswith("dict") or m.return_type.startswith("list"))
+            for m in all_methods
+        ) or any(ftype == "dict" for ev in plan.events for _fname, ftype in ev.fields)
+
         # Imports
-        lines.append("import 'dart:convert';")
+        if needs_json:
+            lines.append("import 'dart:convert';")
         lines.append("import 'package:flet/flet.dart';")
         lines.append("import 'package:flutter/foundation.dart';")
         if plan.dart_import:
@@ -72,6 +108,8 @@ class DartServiceGenerator(CodeGenerator):
         lines.append("")
         lines.append("  bool _initialized = false;")
         lines.append("  bool _listenersSetup = false;")
+        if needs_instance:
+            lines.append(f"  final {main_class} {instance_var} = {main_class}();")
         lines.append("")
 
         # init()
@@ -103,22 +141,15 @@ class DartServiceGenerator(CodeGenerator):
         self._render_initialize(lines, plan, class_name)
 
         # _setupListeners with real event listeners
-        self._render_setup_listeners(lines, plan, class_name)
-
-        # Enum parser helpers (if plan uses enums in methods)
-        self._render_enum_helpers(lines, plan)
+        self._render_setup_listeners(lines, plan, class_name, instance_var, needs_instance)
 
         # _onInvokeMethod with switch dispatch
         self._render_invoke_method(lines, plan)
 
         # Method implementations with real SDK calls
-        all_methods = list(plan.main_methods)
-        for sub in plan.sub_modules:
-            all_methods.extend(sub.methods)
-
         for method in all_methods:
             sub_module = self._find_sub_module_for_method(method, plan)
-            lines.extend(self._render_dart_method(method, plan, sub_module))
+            lines.extend(self._render_dart_method(method, plan, sub_module, instance_var))
             lines.append("")
 
         # _handleError
@@ -147,8 +178,8 @@ class DartServiceGenerator(CodeGenerator):
         Returns:
             Complete Dart source code string.
         """
-        widget_class = f"{plan.control_name}Widget"
-        state_class = f"_{plan.control_name}WidgetState"
+        widget_class = f"{plan.control_name}Control"
+        state_class = f"_{plan.control_name}ControlState"
         sdk_class = plan.dart_main_class or plan.control_name
         lines: list[str] = []
 
@@ -188,15 +219,20 @@ class DartServiceGenerator(CodeGenerator):
         # Read properties using typed getters
         if plan.properties:
             for prop in plan.properties:
+                # The "type" discriminator is read by the family-variant switch
+                # below; skip it here to avoid a duplicate local declaration.
+                if plan.widget_family_variants and prop.python_name == "type":
+                    continue
                 dart_var = _to_camel_case(prop.python_name)
                 if prop.dart_getter:
-                    # Use the pre-computed typed getter from the analyzer
-                    if prop.dart_getter.startswith("widget.") or prop.dart_getter.startswith(
-                        "buildWidget"
-                    ):
+                    # Use the pre-computed typed getter from the analyzer.
+                    # Getters reference `control.` (incl. buildWidget/buildWidgets);
+                    # rewrite to the State's `widget.control.` receiver.
+                    if prop.dart_getter.startswith("widget."):
                         getter_expr = prop.dart_getter
                     else:
                         getter_expr = prop.dart_getter.replace("control.", "widget.control.")
+                    getter_expr = _coalesce_nonnull_getter(getter_expr, prop.dart_type)
                     lines.append(f"      final {dart_var} = {getter_expr};")
                 else:
                     # Fallback to getString
@@ -239,7 +275,7 @@ class DartServiceGenerator(CodeGenerator):
             lines.append("      return LayoutControl(")
             lines.append("        control: widget.control,")
             lines.append(f"        child: {sdk_class}(")
-            for prop in plan.properties:
+            for prop in _ctor_arg_order(plan.properties):
                 dart_var = _to_camel_case(prop.python_name)
                 # Use the original Dart param name for the constructor
                 dart_param = prop.dart_name or prop.python_name
@@ -280,8 +316,8 @@ class DartServiceGenerator(CodeGenerator):
 
     def _generate_sibling_widget(self, sibling: SiblingWidgetPlan, plan: GenerationPlan) -> str:
         """Generate a standalone StatefulWidget Dart file for a sibling widget."""
-        widget_class = f"{sibling.control_name}Widget"
-        state_class = f"_{sibling.control_name}WidgetState"
+        widget_class = f"{sibling.control_name}Control"
+        state_class = f"_{sibling.control_name}ControlState"
         sdk_class = sibling.dart_class_name
         needs_material = any(
             "Theme.of(context)" in (p.dart_getter or "") for p in sibling.properties
@@ -324,8 +360,7 @@ class DartServiceGenerator(CodeGenerator):
                 dart_var = _to_camel_case(prop.python_name)
                 if prop.dart_getter:
                     getter_expr = prop.dart_getter.replace("control.", "widget.control.")
-                    if getter_expr.startswith("buildWidget"):
-                        getter_expr = prop.dart_getter
+                    getter_expr = _coalesce_nonnull_getter(getter_expr, prop.dart_type)
                     lines.append(f"      final {dart_var} = {getter_expr};")
                 else:
                     lines.append(
@@ -337,7 +372,7 @@ class DartServiceGenerator(CodeGenerator):
         lines.append("      return LayoutControl(")
         lines.append("        control: widget.control,")
         lines.append(f"        child: {sdk_class}(")
-        for prop in sibling.properties:
+        for prop in _ctor_arg_order(sibling.properties):
             dart_var = _to_camel_case(prop.python_name)
             dart_param = prop.dart_name or prop.python_name
             lines.append(f"          {dart_param}: {dart_var},")
@@ -367,29 +402,38 @@ class DartServiceGenerator(CodeGenerator):
         return "\n".join(lines)
 
     def _generate_extension_dart(self, plan: GenerationPlan) -> str:
-        """Generate extension.dart that registers main + sibling widgets."""
+        """Generate ``extension.dart`` registering the main + sibling controls.
+
+        Follows the official Flet convention: a ``FletExtension`` subclass that
+        maps ``control.type`` to the matching ``{Control}Control`` widget via
+        ``createWidget``. Lives at ``lib/src/extension.dart`` and is re-exported
+        by ``lib/{package}.dart``.
+        """
         control_snake = plan.control_name_snake or camel_to_snake(plan.control_name)
         lines: list[str] = []
 
-        # Imports
+        # Imports (relative to lib/src/)
         lines.append("import 'package:flet/flet.dart';")
         lines.append("import 'package:flutter/widgets.dart';")
-        lines.append(f"import 'src/{control_snake}_widget.dart';")
+        lines.append(f"import '{control_snake}_control.dart';")
         for sibling in plan.sibling_widgets:
             sib_snake = sibling.control_name_snake or camel_to_snake(sibling.control_name)
-            lines.append(f"import 'src/{sib_snake}_widget.dart';")
+            lines.append(f"import '{sib_snake}_control.dart';")
         lines.append("")
 
-        # createControl function
-        lines.append("Widget? createControl(Control control) {")
-        lines.append("  switch (control.type) {")
-        lines.append(f'    case "{plan.control_name}":')
-        lines.append(f"      return {plan.control_name}Widget(control: control);")
+        # FletExtension.createWidget dispatch
+        lines.append("class Extension extends FletExtension {")
+        lines.append("  @override")
+        lines.append("  Widget? createWidget(Key? key, Control control) {")
+        lines.append("    switch (control.type) {")
+        lines.append(f'      case "{plan.control_name}":')
+        lines.append(f"        return {plan.control_name}Control(control: control);")
         for sibling in plan.sibling_widgets:
-            lines.append(f'    case "{sibling.control_name}":')
-            lines.append(f"      return {sibling.control_name}Widget(control: control);")
-        lines.append("    default:")
-        lines.append("      return null;")
+            lines.append(f'      case "{sibling.control_name}":')
+            lines.append(f"        return {sibling.control_name}Control(control: control);")
+        lines.append("      default:")
+        lines.append("        return null;")
+        lines.append("    }")
         lines.append("  }")
         lines.append("}")
         lines.append("")
@@ -425,12 +469,11 @@ class DartServiceGenerator(CodeGenerator):
         for prop in sub.properties:
             dart_var = _to_camel_case(prop.python_name)
             if prop.dart_getter:
-                if prop.dart_getter.startswith("widget.") or prop.dart_getter.startswith(
-                    "buildWidget"
-                ):
+                if prop.dart_getter.startswith("widget."):
                     getter_expr = prop.dart_getter
                 else:
                     getter_expr = prop.dart_getter.replace("control.", "widget.control.")
+                getter_expr = _coalesce_nonnull_getter(getter_expr, prop.dart_type)
                 lines.append(f"      final {dart_var} = {getter_expr};")
             else:
                 lines.append(
@@ -442,7 +485,7 @@ class DartServiceGenerator(CodeGenerator):
 
         # Build constructor call
         lines.append(f"      return {sub.dart_class_name}(")
-        for prop in sub.properties:
+        for prop in _ctor_arg_order(sub.properties):
             dart_var = _to_camel_case(prop.python_name)
             dart_param = prop.dart_name or prop.python_name
             lines.append(f"        {dart_param}: {dart_var},")
@@ -551,26 +594,46 @@ class DartServiceGenerator(CodeGenerator):
     # ------------------------------------------------------------------
 
     def _render_setup_listeners(
-        self, lines: list[str], plan: GenerationPlan, class_name: str
+        self,
+        lines: list[str],
+        plan: GenerationPlan,
+        class_name: str,
+        instance_var: str = "",
+        needs_instance: bool = False,
     ) -> None:
         lines.append("  /// Setup all event listeners.")
         lines.append("  void _setupListeners() {")
         lines.append("    if (_listenersSetup) return;")
         lines.append("    _listenersSetup = true;")
 
+        # A main-class stream getter is an instance member — dispatch on the
+        # instance var, not the class name (avoids static_access_to_instance_member).
+        main_accessor = (
+            instance_var if needs_instance else (plan.dart_main_class or plan.control_name)
+        )
+
         if plan.events:
             lines.append("")
             for event in plan.events:
-                accessor = event.dart_sdk_accessor or plan.dart_main_class
+                accessor = event.dart_sdk_accessor or main_accessor
                 listener_method = event.dart_listener_method
                 event_name = event.dart_event_name
 
                 if not listener_method:
                     continue
 
-                # Generate real listener registration
+                # Generate real listener registration. A Dart Stream is
+                # subscribed via `.listen(...)`; a stream getter has no call
+                # parens, a stream-returning method does. Callback-registration
+                # APIs (non-stream) take the handler directly.
                 lines.append(f"    // {event.python_attr_name}")
-                lines.append(f"    {accessor}.{listener_method}((event) {{")
+                if event.is_stream:
+                    stream_expr = f"{accessor}.{listener_method}"
+                    if not event.stream_is_getter:
+                        stream_expr += "()"
+                    lines.append(f"    {stream_expr}.listen((event) {{")
+                else:
+                    lines.append(f"    {accessor}.{listener_method}((event) {{")
                 lines.append("      try {")
                 lines.append(f'        control.triggerEvent("{event_name}", {{')
 
@@ -609,22 +672,6 @@ class DartServiceGenerator(CodeGenerator):
     # ------------------------------------------------------------------
     # Enum parser helpers
     # ------------------------------------------------------------------
-
-    def _render_enum_helpers(self, lines: list[str], plan: GenerationPlan) -> None:
-        """Render helper methods to parse enum string values."""
-        for enum in plan.enums:
-            dart_name = enum.python_name
-            lines.append(f"  {dart_name} _parse{dart_name}(String value) {{")
-            lines.append("    return switch (value.toLowerCase()) {")
-            for val_name, val_value, _val_doc in enum.values:
-                lines.append(f'      "{val_value}" => {dart_name}.{val_name},')
-            # Default fallback
-            if enum.values:
-                default_val = enum.values[0][0]
-                lines.append(f"      _ => {dart_name}.{default_val},")
-            lines.append("    };")
-            lines.append("  }")
-            lines.append("")
 
     # ------------------------------------------------------------------
     # _onInvokeMethod dispatch
@@ -684,14 +731,19 @@ class DartServiceGenerator(CodeGenerator):
         method: MethodPlan,
         plan: GenerationPlan,
         sub_module: SubModulePlan | None,
+        instance_var: str = "",
     ) -> list[str]:
         """Render a single Dart method with a real SDK call."""
         lines: list[str] = []
         impl_name = _to_dart_method_name(method.dart_method_name)
 
-        # Determine SDK call path
+        # Determine SDK call path. Instance methods are dispatched on the
+        # instantiated SDK object; static methods (and namespaced sub-modules)
+        # are dispatched on the class/namespace path.
         if sub_module and sub_module.dart_sdk_accessor:
             sdk_accessor = sub_module.dart_sdk_accessor
+        elif not method.is_static and instance_var:
+            sdk_accessor = instance_var
         else:
             sdk_accessor = plan.dart_main_class or plan.control_name
 
@@ -699,35 +751,35 @@ class DartServiceGenerator(CodeGenerator):
         original_name = method.dart_original_name or method.python_name
         dart_return = method.return_type
 
+        # Only await Future-returning SDK calls. Awaiting a synchronous method
+        # or getter raises await_only_futures / use_of_void_result in
+        # `flutter analyze`.
+        aw = "await " if method.dart_is_async else ""
+
         if method.params:
             lines.append(f"  Future<String?> {impl_name}(Map<String, dynamic> args) async {{")
             # Extract arguments using python_name as key (matches what Python sends)
             for p in method.params:
-                dart_type = _dart_cast_type(p.dart_type)
                 var_name = _safe_dart_var(p.dart_name)
-                lines.append(f'    final {var_name} = args["{p.python_name}"] as {dart_type};')
+                extraction = _dart_arg_extraction(p.python_name, p.dart_type)
+                lines.append(f"    final {var_name} = {extraction};")
 
             # Build null check condition for required params
             required_params = [p for p in method.params if not p.is_optional]
 
-            # Build SDK call arguments (use "name: name" for named params)
-            # Required params are passed directly; optional params use
-            # conditional forwarding so they are only sent when non-null.
+            # Build SDK call arguments. Named params (required or optional)
+            # are forwarded as "name: var"; positional params as "var", in
+            # declaration order. Optional values are extracted as nullable
+            # from the args map and forwarded directly: a collection-`if`
+            # (`if (x != null) name: x`) is NOT valid inside a Dart call
+            # argument list, and optional named SDK params are nullable.
             sdk_arg_parts = []
-            optional_parts = []
             for p in method.params:
                 v = _safe_dart_var(p.dart_name)
-                if p.is_optional:
-                    if p.is_named:
-                        optional_parts.append((p.dart_name, v))
+                if p.is_named:
+                    sdk_arg_parts.append(f"{p.dart_name}: {v}")
                 else:
-                    if p.is_named:
-                        sdk_arg_parts.append(f"{p.dart_name}: {v}")
-                    else:
-                        sdk_arg_parts.append(v)
-            # Add optional named params with null check
-            for orig_name, safe_name in optional_parts:
-                sdk_arg_parts.append(f"if ({safe_name} != null) {orig_name}: {safe_name}")
+                    sdk_arg_parts.append(v)
             sdk_args = ", ".join(sdk_arg_parts)
 
             if required_params:
@@ -738,19 +790,19 @@ class DartServiceGenerator(CodeGenerator):
 
                 # Determine return handling
                 if dart_return == "None":
-                    lines.append(f"      await {sdk_accessor}.{original_name}({sdk_args});")
+                    lines.append(f"      {aw}{sdk_accessor}.{original_name}({sdk_args});")
                     lines.append("    }")
                     lines.append("    return null;")
                 elif "bool" in dart_return.lower():
                     lines.append(
-                        f"      final result = await {sdk_accessor}.{original_name}({sdk_args});"
+                        f"      final result = {aw}{sdk_accessor}.{original_name}({sdk_args});"
                     )
                     lines.append("      return result.toString();")
                     lines.append("    }")
                     lines.append("    return null;")
                 else:
                     lines.append(
-                        f"      final result = await {sdk_accessor}.{original_name}({sdk_args});"
+                        f"      final result = {aw}{sdk_accessor}.{original_name}({sdk_args});"
                     )
                     lines.append("      return result?.toString();")
                     lines.append("    }")
@@ -758,11 +810,11 @@ class DartServiceGenerator(CodeGenerator):
             else:
                 # All params are optional - call directly
                 if dart_return == "None":
-                    lines.append(f"    await {sdk_accessor}.{original_name}({sdk_args});")
+                    lines.append(f"    {aw}{sdk_accessor}.{original_name}({sdk_args});")
                     lines.append("    return null;")
                 else:
                     lines.append(
-                        f"    final result = await {sdk_accessor}.{original_name}({sdk_args});"
+                        f"    final result = {aw}{sdk_accessor}.{original_name}({sdk_args});"
                     )
                     lines.append("    return result?.toString();")
         else:
@@ -777,18 +829,18 @@ class DartServiceGenerator(CodeGenerator):
             )
 
             if dart_return == "None":
-                lines.append(f"    await {call};")
+                lines.append(f"    {aw}{call};")
                 lines.append("    return null;")
             elif "bool" in dart_return.lower():
-                lines.append(f"    final result = await {call};")
+                lines.append(f"    final result = {aw}{call};")
                 lines.append("    return result.toString();")
             elif dart_return in ("str", "str | None"):
-                lines.append(f"    return await {call};")
+                lines.append(f"    return {aw}{call};")
             elif dart_return.startswith("dict") or dart_return.startswith("list"):
-                lines.append(f"    final result = await {call};")
+                lines.append(f"    final result = {aw}{call};")
                 lines.append("    return jsonEncode(result);")
             else:
-                lines.append(f"    final result = await {call};")
+                lines.append(f"    final result = {aw}{call};")
                 lines.append("    return result?.toString();")
 
         lines.append("  }")
@@ -830,6 +882,17 @@ class DartServiceGenerator(CodeGenerator):
                 return sub
         return None
 
+    @staticmethod
+    def _method_uses_instance(method: MethodPlan, sub_module: SubModulePlan | None) -> bool:
+        """Whether a method is dispatched on an SDK instance (vs a static path).
+
+        A method needs an instance when it is non-static and not routed through a
+        namespaced sub-module accessor (those resolve to a static path).
+        """
+        if method.is_static:
+            return False
+        return not (sub_module and sub_module.dart_sdk_accessor)
+
 
 def _to_dart_method_name(snake_name: str) -> str:
     """Convert a snake_case dart method name to a _camelCase Dart function name."""
@@ -841,6 +904,49 @@ def _to_camel_case(snake_name: str) -> str:
     """Convert snake_case to camelCase."""
     parts = snake_name.split("_")
     return parts[0] + "".join(p.capitalize() for p in parts[1:])
+
+
+def _coalesce_nonnull_getter(getter_expr: str, dart_type: str) -> str:
+    """Coalesce a nullable getter feeding a non-nullable SDK parameter.
+
+    Flet getters return nullable values (``buildWidget`` → ``Widget?``,
+    ``getDouble`` → ``double?``, ``getInt`` → ``int?``, ``getString`` →
+    ``String?``); passing them to a non-nullable SDK parameter raises
+    ``argument_type_not_assignable`` in ``flutter analyze``. When the Dart param
+    is nullable (ends with ``?``) the value is forwarded as-is. List children
+    (``buildWidgets`` → non-null ``List<Widget>``) and ``getBool`` (already
+    ``!``-coalesced) are left untouched.
+    """
+    if dart_type.endswith("?"):
+        return getter_expr  # param accepts null
+    # parseEnum(<Enum>.values, getString(...)) → coalesce with the first value.
+    # Checked before getString since the call is nested inside parseEnum.
+    if "parseEnum(" in getter_expr:
+        enum_type = getter_expr.split("parseEnum(", 1)[1].split(".values", 1)[0].strip()
+        return f"{getter_expr} ?? {enum_type}.values.first"
+    if "buildWidget(" in getter_expr:
+        return f"{getter_expr} ?? const SizedBox.shrink()"
+    if "getDouble(" in getter_expr:
+        return f"{getter_expr} ?? 0.0"
+    if "getInt(" in getter_expr:
+        return f"{getter_expr} ?? 0"
+    if "getString(" in getter_expr:
+        return f'{getter_expr} ?? ""'
+    return getter_expr
+
+
+def _ctor_arg_order(props):
+    """Order SDK constructor args so child/children (Widget) params come last.
+
+    Satisfies the Dart `sort_child_properties_last` lint. Stable for all other
+    params. Child params are detected by their buildWidget/buildWidgets getter.
+    """
+
+    def _is_child(p) -> bool:
+        getter = p.dart_getter or ""
+        return "buildWidget(" in getter or "buildWidgets(" in getter
+
+    return [p for p in props if not _is_child(p)] + [p for p in props if _is_child(p)]
 
 
 _DART_RESERVED = frozenset(
@@ -902,3 +1008,20 @@ def _dart_cast_type(dart_type: str) -> str:
     if dart_type.startswith("List"):
         return "List?"
     return "dynamic"
+
+
+def _dart_arg_extraction(key: str, dart_type: str) -> str:
+    """Build the RHS expression to extract a method argument from ``args``.
+
+    JSON arrives as ``List<dynamic>``/``Map<dynamic, dynamic>``, so a typed SDK
+    param like ``List<String>`` needs ``.cast<String>()`` (a plain
+    ``as List<String>`` throws at runtime). Preserves the element types so the
+    SDK call type-checks instead of failing with ``List<dynamic>`` mismatches.
+    """
+    base = dart_type.strip().rstrip("?")
+    inner_match = re.match(r"(List|Map|Set)<(.+)>$", base)
+    if inner_match:
+        outer, inner = inner_match.group(1), inner_match.group(2).strip()
+        if inner and inner != "dynamic" and "dynamic" not in inner:
+            return f'(args["{key}"] as {outer}?)?.cast<{inner}>()'
+    return f'args["{key}"] as {_dart_cast_type(dart_type)}'

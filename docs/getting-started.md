@@ -75,6 +75,25 @@ Common Flutter affixes (`flutter_`, `_flutter`, `_plus`, `_pro`) are stripped au
 ## What's next
 
 - Edit the Python control file in `src/<package_name>/` to implement your Flet control
-- Edit the Dart service/widget in `src/flutter/<package_name>/lib/src/`
+- Review and complete the generated Dart service/widget in `src/flutter/<package_name>/lib/src/` (it's a working scaffold)
 - Add examples in `examples/`
 - Run `flet-pkg --help` for all available options
+
+### Trying out your extension
+
+The example app under `examples/<package_name>_example/` is pre-wired to use your
+extension from source. **Build** it to test the control:
+
+```bash
+cd examples/<package_name>_example
+uv sync
+flet build macos    # or: windows | linux | apk | aab | ipa | web
+```
+
+!!! warning "Use `flet build`, not `flet run`"
+
+    `flet run` launches Flet's prebuilt client, which only knows the built-in
+    controls — a control from a custom extension renders as *"Unknown control"*
+    (and a custom service's Dart code never runs). `flet build` compiles a Flutter
+    app that includes your extension's Dart code, so it actually works. This is the
+    most common point of confusion when starting out.

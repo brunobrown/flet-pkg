@@ -1,9 +1,24 @@
 from flet_pkg.core.type_map import (
     get_flet_dart_getter,
+    is_known_enum,
     map_dart_type,
     map_dart_type_flet,
     map_return_type,
 )
+
+
+class TestIsKnownEnum:
+    def test_flutter_framework_enum(self):
+        assert is_known_enum("Axis", frozenset())
+        assert is_known_enum("WrapAlignment", frozenset())
+        assert is_known_enum("TextDirection", frozenset())
+
+    def test_package_enum(self):
+        assert is_known_enum("OSLogLevel", frozenset({"OSLogLevel"}))
+
+    def test_non_enum(self):
+        assert not is_known_enum("RatingWidget", frozenset())
+        assert not is_known_enum("DottedBorderOptions", frozenset({"SomethingElse"}))
 
 
 class TestMapDartType:
@@ -167,7 +182,7 @@ class TestGetFletDartGetter:
 
     def test_control(self):
         result = get_flet_dart_getter("ft.Control", "child")
-        assert result == 'buildWidget("child")'
+        assert result == 'control.buildWidget("child")'
 
     def test_bool(self):
         result = get_flet_dart_getter("bool", "enabled")
@@ -183,7 +198,7 @@ class TestGetFletDartGetter:
 
     def test_list_control(self):
         result = get_flet_dart_getter("list[ft.Control]", "children")
-        assert result == 'buildWidgets("children")'
+        assert result == 'control.buildWidgets("children")'
 
     def test_unknown_fallback(self):
         result = get_flet_dart_getter("SomeCustomType", "custom")

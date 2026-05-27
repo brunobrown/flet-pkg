@@ -114,7 +114,15 @@ class MethodPlan:
     return_type: str = "None"
     docstring: str = ""
     is_async: bool = True
+    """The generated Python wrapper is always async (it calls ``_invoke_method``)."""
+    dart_is_async: bool = True
+    """Whether the underlying Dart SDK call returns a ``Future`` and must be awaited.
+
+    ``False`` for synchronous SDK methods/getters — awaiting those triggers
+    ``await_only_futures`` / ``use_of_void_result`` in ``flutter analyze``.
+    """
     is_getter: bool = False
+    is_static: bool = False
     dart_original_name: str = ""
     dart_class_name: str = ""
 
@@ -151,6 +159,13 @@ class PropertyPlan:
     Example: ``control.getAlignment("alignment")``.
     Populated by the analyzer for ``ui_control`` extensions.
     """
+    dart_type: str = ""
+    """Original Dart constructor-param type (e.g. ``Widget``, ``Widget?``).
+
+    Used by the Dart widget generator to decide nullability — e.g. whether a
+    ``buildWidget(...)`` child (which returns ``Widget?``) must be coalesced
+    with a fallback before being passed to a non-nullable SDK parameter.
+    """
 
 
 @dataclass
@@ -163,6 +178,11 @@ class EventPlan:
     fields: list[tuple[str, str]] = field(default_factory=list)
     dart_listener_method: str = ""
     dart_sdk_accessor: str = ""
+    is_stream: bool = False
+    """True when the event source is a Dart ``Stream`` → dispatch via ``.listen(...)``."""
+    stream_is_getter: bool = False
+    """True when the stream is a getter (``stream.listen``); False when it is a
+    method returning a stream (``getStream().listen``)."""
 
     def __post_init__(self):
         if not self.dart_event_name:

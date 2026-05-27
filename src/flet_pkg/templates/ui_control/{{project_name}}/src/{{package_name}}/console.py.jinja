@@ -384,7 +384,7 @@ class DebugConsole:
             actions_alignment=ft.MainAxisAlignment.END,
         )
 
-        # Use Flet 0.80.x dialog API
+        # Flet 0.85+ dialog API
         self._page.show_dialog(self._dialog)
 
     def _apply_filter(self, level: Optional[LogLevel]):

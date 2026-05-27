@@ -1,9 +1,9 @@
-<p align="center"><img src="https://github.com/user-attachments/assets/06ef3010-78b7-4007-b5f7-40cf0201cf3a" width="500" height="500" alt="Flet PKG"></p>
+<p align="center"><img src="https://github.com/user-attachments/assets/06ef3010-78b7-4007-b5f7-40cf0201cf3a" width="50%" height="50%" alt="Flet PKG"></p>
 
 **CLI tool that scaffolds Flet extension packages from Flutter packages, with auto-generated Python controls, Dart bridge code, type mappings, and event handlers.**
 
 ![Python](https://img.shields.io/badge/python-3.10+-3776AB?logo=python&logoColor=white)
-![Flet](https://img.shields.io/badge/flet-0.80.0+-00B4D8?logo=flet)
+![Flet](https://img.shields.io/badge/flet-0.85.0+-00B4D8?logo=flet)
 [![Main](https://github.com/brunobrown/flet-pkg/actions/workflows/main.yml/badge.svg?branch=main)](https://github.com/brunobrown/flet-pkg/actions/workflows/main.yml)
 [![Dev](https://github.com/brunobrown/flet-pkg/actions/workflows/dev.yml/badge.svg?branch=dev)](https://github.com/brunobrown/flet-pkg/actions/workflows/dev.yml)
 [![Docs](https://img.shields.io/badge/docs-mkdocs-blue)](https://brunobrown.github.io/flet-pkg)

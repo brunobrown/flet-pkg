@@ -1044,3 +1044,16 @@ class TestSiblingWidgetProcessing:
         assert len(plan.sibling_widgets) >= 1
         sibling = plan.sibling_widgets[0]
         assert len(sibling.properties) > 0
+
+    def test_many_unrelated_widgets_are_not_family(self, analyzer):
+        """Many widgets with NO shared params (flutter_slidable) → single, not family."""
+        widgets = [
+            self._make_widget("Slidable", ["groupTag"]),
+            self._make_widget("ActionPane", ["extentRatio"]),
+            self._make_widget("SlidableAction", ["onPressed"]),
+            self._make_widget("FlexExitTransition", ["mainAxisExtent"]),
+            self._make_widget("DismissiblePane", ["onDismissed"]),
+            self._make_widget("CustomSlidableAction", ["flex"]),
+        ]
+        strategy, _ = analyzer._classify_multi_widgets(widgets, "Slidable")
+        assert strategy == "single"

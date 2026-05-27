@@ -265,6 +265,141 @@ class TestDartServiceGenerator:
         content = files["one_signal_service.dart"]
         assert "package:onesignal_flutter/onesignal_flutter.dart" in content
 
+    def test_no_unused_enum_parser_helpers(self, sample_plan):
+        """Enum parser helpers were dead code (never called) → must not be emitted.
+
+        sample_plan has an OSLogLevel enum; the service must NOT contain a
+        `_parseOSLogLevel` helper (it would be an unused_element in analyze).
+        """
+        content = DartServiceGenerator().generate(sample_plan)["one_signal_service.dart"]
+        assert "_parse" not in content
+
+    def test_typed_list_arg_uses_cast(self):
+        """A List<String>/Map<String,String> param must use .cast<T>() (JSON is
+        List<dynamic>) so the SDK call type-checks instead of List<dynamic> mismatch."""
+        plan = GenerationPlan(
+            control_name="Tagger",
+            package_name="flet_tagger",
+            base_class="ft.Service",
+            flutter_package="tagger",
+            dart_import="package:tagger/tagger.dart",
+            dart_main_class="Tagger",
+            main_methods=[
+                MethodPlan(
+                    python_name="remove_aliases",
+                    dart_method_name="remove_aliases",
+                    dart_original_name="removeAliases",
+                    params=[
+                        ParamPlan(
+                            python_name="aliases",
+                            python_type="list[str]",
+                            dart_name="aliases",
+                            dart_type="List<String>",
+                        )
+                    ],
+                    return_type="None",
+                ),
+            ],
+        )
+        content = DartServiceGenerator().generate(plan)["tagger_service.dart"]
+        assert 'final aliases = (args["aliases"] as List?)?.cast<String>();' in content
+        assert "as List<String>" not in content
+
+    def test_stream_event_uses_listen_on_instance(self):
+        """A stream-getter event must dispatch via `.listen(...)` on the instance.
+
+        `Battery().onBatteryStateChanged` is an instance Stream getter — emitting
+        `Battery.onBatteryStateChanged((event){...})` causes both
+        static_access_to_instance_member and invocation_of_non_function_expression.
+        """
+        plan = GenerationPlan(
+            control_name="Battery",
+            package_name="flet_battery",
+            base_class="ft.Service",
+            flutter_package="battery_plus",
+            dart_import="package:battery_plus/battery_plus.dart",
+            dart_main_class="Battery",
+            events=[
+                EventPlan(
+                    python_attr_name="on_battery_state_changed",
+                    event_class_name="BatteryBatteryStateEvent",
+                    dart_event_name="battery_state_changed",
+                    dart_listener_method="onBatteryStateChanged",
+                    fields=[("value", "str")],
+                    is_stream=True,
+                    stream_is_getter=True,
+                ),
+            ],
+        )
+        content = DartServiceGenerator().generate(plan)["battery_service.dart"]
+        assert "final Battery _battery = Battery();" in content
+        assert "_battery.onBatteryStateChanged.listen((event) {" in content
+        # No static access, no direct invocation of the stream getter.
+        assert "Battery.onBatteryStateChanged" not in content.replace("_battery.", "")
+        assert "_battery.onBatteryStateChanged((event)" not in content
+
+    def test_dart_convert_import_only_when_used(self, sample_plan):
+        """`import 'dart:convert'` only when jsonEncode/jsonDecode is actually used."""
+        gen = DartServiceGenerator()
+        # sample_plan has get_tags() returning dict → jsonEncode → needs convert.
+        used = gen.generate(sample_plan)["one_signal_service.dart"]
+        assert "import 'dart:convert';" in used
+        assert "jsonEncode" in used
+
+        # A plan with only simple (str/None) returns must NOT import dart:convert.
+        plan = GenerationPlan(
+            control_name="Simple",
+            package_name="flet_simple",
+            base_class="ft.Service",
+            flutter_package="simple",
+            dart_import="package:simple/simple.dart",
+            dart_main_class="Simple",
+            main_methods=[
+                MethodPlan(python_name="ping", dart_method_name="ping", return_type="None")
+            ],
+        )
+        unused = DartServiceGenerator().generate(plan)["simple_service.dart"]
+        assert "import 'dart:convert';" not in unused
+
+    def test_sync_method_is_not_awaited(self):
+        """Synchronous (non-Future) SDK calls must not be awaited.
+
+        Awaiting them triggers await_only_futures / use_of_void_result in
+        ``flutter analyze`` (regression for the listener/void await bug).
+        """
+        plan = GenerationPlan(
+            control_name="SecureStorage",
+            package_name="flet_secure_storage",
+            base_class="ft.Service",
+            flutter_package="flutter_secure_storage",
+            dart_import="package:flutter_secure_storage/flutter_secure_storage.dart",
+            dart_main_class="FlutterSecureStorage",
+            main_methods=[
+                MethodPlan(
+                    python_name="register_listener",
+                    dart_method_name="register_listener",
+                    dart_original_name="registerListener",
+                    params=[ParamPlan(python_name="key", python_type="str", dart_name="key")],
+                    return_type="None",
+                    is_async=True,
+                    dart_is_async=False,  # SDK method returns void (synchronous)
+                ),
+                MethodPlan(
+                    python_name="write",
+                    dart_method_name="write",
+                    dart_original_name="write",
+                    params=[ParamPlan(python_name="key", python_type="str", dart_name="key")],
+                    return_type="None",
+                    is_async=True,
+                    dart_is_async=True,  # SDK method returns Future<void>
+                ),
+            ],
+        )
+        content = DartServiceGenerator().generate(plan)["secure_storage_service.dart"]
+        assert "_flutterSecureStorage.registerListener(key);" in content
+        assert "await _flutterSecureStorage.registerListener" not in content
+        assert "await _flutterSecureStorage.write(key);" in content
+
 
 class TestDartUIControlGenerator:
     """Tests for StatefulWidget generation for UI controls."""
@@ -310,37 +445,37 @@ class TestDartUIControlGenerator:
     def test_generates_widget_file(self, ui_plan):
         gen = DartServiceGenerator()
         files = gen.generate(ui_plan)
-        assert "rive_widget.dart" in files
+        assert "rive_control.dart" in files
 
     def test_contains_stateful_widget(self, ui_plan):
         gen = DartServiceGenerator()
         files = gen.generate(ui_plan)
-        content = files["rive_widget.dart"]
-        assert "class RiveWidget extends StatefulWidget" in content
+        content = files["rive_control.dart"]
+        assert "class RiveControl extends StatefulWidget" in content
 
     def test_contains_state_class(self, ui_plan):
         gen = DartServiceGenerator()
         files = gen.generate(ui_plan)
-        content = files["rive_widget.dart"]
-        assert "class _RiveWidgetState extends State<RiveWidget>" in content
+        content = files["rive_control.dart"]
+        assert "class _RiveControlState extends State<RiveControl>" in content
 
     def test_contains_layout_control(self, ui_plan):
         gen = DartServiceGenerator()
         files = gen.generate(ui_plan)
-        content = files["rive_widget.dart"]
+        content = files["rive_control.dart"]
         assert "LayoutControl(" in content
         assert "control: widget.control," in content
 
     def test_contains_sdk_widget(self, ui_plan):
         gen = DartServiceGenerator()
         files = gen.generate(ui_plan)
-        content = files["rive_widget.dart"]
+        content = files["rive_control.dart"]
         assert "RiveAnimation(" in content
 
     def test_contains_typed_getters(self, ui_plan):
         gen = DartServiceGenerator()
         files = gen.generate(ui_plan)
-        content = files["rive_widget.dart"]
+        content = files["rive_control.dart"]
         assert "getBoxFit" in content
         assert "getAlignment" in content
         assert "getBool" in content
@@ -348,20 +483,20 @@ class TestDartUIControlGenerator:
     def test_contains_error_handler(self, ui_plan):
         gen = DartServiceGenerator()
         files = gen.generate(ui_plan)
-        content = files["rive_widget.dart"]
+        content = files["rive_control.dart"]
         assert "_handleError" in content
         assert 'triggerEvent("error"' in content
 
     def test_contains_flutter_widgets_import(self, ui_plan):
         gen = DartServiceGenerator()
         files = gen.generate(ui_plan)
-        content = files["rive_widget.dart"]
+        content = files["rive_control.dart"]
         assert "package:flutter/widgets.dart" in content
 
     def test_no_flet_widget_base_class(self, ui_plan):
         gen = DartServiceGenerator()
         files = gen.generate(ui_plan)
-        content = files["rive_widget.dart"]
+        content = files["rive_control.dart"]
         assert "FletWidget" not in content
 
     def test_dart_constructor_uses_camel_case_names(self):
@@ -391,7 +526,7 @@ class TestDartUIControlGenerator:
         )
         gen = DartServiceGenerator()
         files = gen.generate(plan)
-        content = files["web_view_widget.dart"]
+        content = files["web_view_control.dart"]
         # Constructor args must use camelCase Dart names
         assert "initialUrl: initialUrl," in content
         assert "debuggingEnabled: debuggingEnabled," in content
@@ -455,14 +590,14 @@ class TestSubControlGeneration:
                     python_type="ActionPane | None",
                     default_value="None",
                     dart_name="startActionPane",
-                    dart_getter='buildWidget("start_action_pane")',
+                    dart_getter='control.buildWidget("start_action_pane")',
                 ),
                 PropertyPlan(
                     python_name="child",
                     python_type="ft.Control | None",
                     default_value="None",
                     dart_name="child",
-                    dart_getter='buildWidget("child")',
+                    dart_getter='control.buildWidget("child")',
                 ),
                 PropertyPlan(
                     python_name="enabled",
@@ -489,7 +624,7 @@ class TestSubControlGeneration:
                             python_type="list[ft.Control]",
                             default_value="field(default_factory=list)",
                             dart_name="children",
-                            dart_getter='buildWidgets("children")',
+                            dart_getter='control.buildWidgets("children")',
                         ),
                     ],
                     parent_property="start_action_pane",
@@ -521,10 +656,24 @@ class TestSubControlGeneration:
         """Dart StatefulWidget should be generated for sub-control."""
         gen = DartServiceGenerator()
         files = gen.generate(slidable_plan)
-        content = files["slidable_widget.dart"]
+        content = files["slidable_control.dart"]
         assert "class ActionPaneWidget extends StatefulWidget" in content
         assert "_ActionPaneWidgetState" in content
         assert "ActionPane(" in content
+
+    def test_dart_build_widget_has_receiver(self, slidable_plan):
+        """buildWidget/buildWidgets must be called on the State's widget.control.
+
+        They are extension methods on Control (flet/src/extensions/control.dart),
+        so a bare `buildWidget("child")` is undefined and breaks `flutter analyze`.
+        """
+        gen = DartServiceGenerator()
+        content = gen.generate(slidable_plan)["slidable_control.dart"]
+        assert 'widget.control.buildWidget("child")' in content
+        assert 'widget.control.buildWidgets("children")' in content
+        # No bare (receiver-less) calls.
+        assert "= buildWidget(" not in content
+        assert "= buildWidgets(" not in content
 
     def test_init_exports_sub_controls(self, slidable_plan):
         """__init__.py should export sub-control classes."""
@@ -533,6 +682,170 @@ class TestSubControlGeneration:
         content = files["__init__.py"]
         assert "from flet_slidable.slidable import ActionPane" in content
         assert '"ActionPane"' in content
+
+    def test_child_nullability_coalesce(self):
+        """A non-nullable child param must coalesce buildWidget() with a fallback.
+
+        buildWidget() returns Widget?, so feeding a `required Widget` param needs
+        `?? const SizedBox.shrink()`. A nullable (Widget?) param is forwarded
+        as-is; list children (buildWidgets) are never coalesced.
+        """
+        plan = GenerationPlan(
+            control_name="Wrapper",
+            package_name="flet_wrapper",
+            base_class="ft.LayoutControl",
+            flutter_package="wrapper",
+            dart_import="package:wrapper/wrapper.dart",
+            dart_main_class="Wrapper",
+            properties=[
+                PropertyPlan(
+                    python_name="child",
+                    python_type="ft.Control | None",
+                    default_value="None",
+                    dart_name="child",
+                    dart_getter='control.buildWidget("child")',
+                    dart_type="Widget",  # required Widget → must coalesce
+                ),
+                PropertyPlan(
+                    python_name="placeholder",
+                    python_type="ft.Control | None",
+                    default_value="None",
+                    dart_name="placeholder",
+                    dart_getter='control.buildWidget("placeholder")',
+                    dart_type="Widget?",  # nullable → forward as-is
+                ),
+            ],
+        )
+        content = DartServiceGenerator().generate(plan)["wrapper_control.dart"]
+        assert (
+            'final child = widget.control.buildWidget("child") ?? const SizedBox.shrink();'
+            in content
+        )
+        assert 'final placeholder = widget.control.buildWidget("placeholder");' in content
+        assert 'placeholder") ?? const SizedBox.shrink()' not in content
+
+    def test_child_property_is_last_in_constructor(self):
+        """Child (Widget) ctor args must come last (Dart sort_child_properties_last)."""
+        plan = GenerationPlan(
+            control_name="Wrapper",
+            package_name="flet_wrapper",
+            base_class="ft.LayoutControl",
+            flutter_package="wrapper",
+            dart_import="package:wrapper/wrapper.dart",
+            dart_main_class="Wrapper",
+            properties=[
+                PropertyPlan(
+                    python_name="child",
+                    python_type="ft.Control | None",
+                    default_value="None",
+                    dart_name="child",
+                    dart_getter='control.buildWidget("child")',
+                    dart_type="Widget?",
+                ),
+                PropertyPlan(
+                    python_name="padding",
+                    python_type="ft.Number | None",
+                    default_value="None",
+                    dart_name="padding",
+                    dart_getter='control.getDouble("padding")',
+                    dart_type="double",
+                ),
+            ],
+        )
+        content = DartServiceGenerator().generate(plan)["wrapper_control.dart"]
+        # In the Wrapper(...) constructor call, `padding:` must precede `child:`.
+        assert content.index("padding: padding,") < content.index("child: child,")
+
+    def test_nonnull_numeric_getter_coalesced(self):
+        """Nullable numeric getters feeding a non-null param must be coalesced.
+
+        `getDouble`/`getInt` return `double?`/`int?` — a non-null SDK param needs
+        `?? 0.0`/`?? 0`; a nullable param is forwarded as-is.
+        """
+        plan = GenerationPlan(
+            control_name="Gauge",
+            package_name="flet_gauge",
+            base_class="ft.LayoutControl",
+            flutter_package="gauge",
+            dart_import="package:gauge/gauge.dart",
+            dart_main_class="Gauge",
+            properties=[
+                PropertyPlan(
+                    python_name="size",
+                    python_type="ft.Number | None",
+                    default_value="None",
+                    dart_name="size",
+                    dart_getter='control.getDouble("size")',
+                    dart_type="double",  # non-null → coalesce
+                ),
+                PropertyPlan(
+                    python_name="count",
+                    python_type="int | None",
+                    default_value="None",
+                    dart_name="count",
+                    dart_getter='control.getInt("count")',
+                    dart_type="int",  # non-null → coalesce
+                ),
+                PropertyPlan(
+                    python_name="max_value",
+                    python_type="ft.Number | None",
+                    default_value="None",
+                    dart_name="maxValue",
+                    dart_getter='control.getDouble("max_value")',
+                    dart_type="double?",  # nullable → forward as-is
+                ),
+            ],
+        )
+        content = DartServiceGenerator().generate(plan)["gauge_control.dart"]
+        assert 'final size = widget.control.getDouble("size") ?? 0.0;' in content
+        assert 'final count = widget.control.getInt("count") ?? 0;' in content
+        assert 'final maxValue = widget.control.getDouble("max_value");' in content
+        assert 'getDouble("max_value") ?? 0.0' not in content
+
+    def test_enum_parseenum_getter_coalesced(self):
+        """A parseEnum getter feeding a non-null enum param must coalesce with
+        ``<Enum>.values.first``; a nullable enum param is forwarded as-is."""
+        plan = GenerationPlan(
+            control_name="Flow",
+            package_name="flet_flow",
+            base_class="ft.LayoutControl",
+            flutter_package="flow",
+            dart_import="package:flow/flow.dart",
+            dart_main_class="Flow",
+            properties=[
+                PropertyPlan(
+                    python_name="direction",
+                    python_type="str | None",
+                    default_value="None",
+                    dart_name="direction",
+                    dart_getter='parseEnum(Axis.values, control.getString("direction"))',
+                    dart_type="Axis",  # non-null → coalesce
+                ),
+                PropertyPlan(
+                    python_name="text_direction",
+                    python_type="str | None",
+                    default_value="None",
+                    dart_name="textDirection",
+                    dart_getter=(
+                        'parseEnum(TextDirection.values, control.getString("text_direction"))'
+                    ),
+                    dart_type="TextDirection?",  # nullable → as-is
+                ),
+            ],
+        )
+        content = DartServiceGenerator().generate(plan)["flow_control.dart"]
+        assert (
+            'parseEnum(Axis.values, widget.control.getString("direction")) ?? Axis.values.first'
+            in content
+        )
+        assert (
+            "final textDirection = parseEnum(TextDirection.values, "
+            'widget.control.getString("text_direction"));' in content
+        )
+        # nullable enum must NOT be coalesced, and getString-inside-parseEnum must
+        # not get a stray `?? ""`.
+        assert "TextDirection.values.first" not in content
+        assert '")) ?? ""' not in content
 
 
 # ---------------------------------------------------------------------------
@@ -596,7 +909,7 @@ class TestWidgetFamilyGeneration:
         """Dart file should contain a switch with all variant cases."""
         gen = DartServiceGenerator()
         files = gen.generate(family_plan)
-        content = files["spin_kit_widget.dart"]
+        content = files["spin_kit_control.dart"]
         assert 'case "circle":' in content
         assert 'case "hour_glass":' in content
         assert 'case "wave":' in content
@@ -608,14 +921,14 @@ class TestWidgetFamilyGeneration:
         """Dart switch should have a default case."""
         gen = DartServiceGenerator()
         files = gen.generate(family_plan)
-        content = files["spin_kit_widget.dart"]
+        content = files["spin_kit_control.dart"]
         assert "default:" in content
 
     def test_dart_family_shared_args(self, family_plan):
         """Each variant should receive the shared args."""
         gen = DartServiceGenerator()
         files = gen.generate(family_plan)
-        content = files["spin_kit_widget.dart"]
+        content = files["spin_kit_control.dart"]
         assert "color: color" in content
         assert "size: size" in content
 
@@ -706,9 +1019,9 @@ class TestSiblingWidgetGeneration:
         """Each sibling should get its own Dart widget file."""
         gen = DartServiceGenerator()
         files = gen.generate(sibling_plan)
-        assert "linear_percent_indicator_widget.dart" in files
-        content = files["linear_percent_indicator_widget.dart"]
-        assert "class LinearPercentIndicatorWidget extends StatefulWidget" in content
+        assert "linear_percent_indicator_control.dart" in files
+        content = files["linear_percent_indicator_control.dart"]
+        assert "class LinearPercentIndicatorControl extends StatefulWidget" in content
         assert "LinearPercentIndicator(" in content
 
     def test_sibling_extension_dart_registers_all(self, sibling_plan):
@@ -717,10 +1030,12 @@ class TestSiblingWidgetGeneration:
         files = gen.generate(sibling_plan)
         assert "extension.dart" in files
         content = files["extension.dart"]
+        assert "class Extension extends FletExtension" in content
+        assert "createWidget" in content
         assert '"CircularPercentIndicator"' in content
         assert '"LinearPercentIndicator"' in content
-        assert "CircularPercentIndicatorWidget(control: control)" in content
-        assert "LinearPercentIndicatorWidget(control: control)" in content
+        assert "CircularPercentIndicatorControl(control: control)" in content
+        assert "LinearPercentIndicatorControl(control: control)" in content
 
     def test_sibling_init_exports_all(self, sibling_plan):
         """__init__.py should export all sibling controls."""

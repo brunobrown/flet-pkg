@@ -30,6 +30,7 @@ from flet_pkg.core.models import (
 from flet_pkg.core.parser import camel_to_snake, parse_dart_package_api
 from flet_pkg.core.type_map import (
     get_flet_dart_getter,
+    is_known_enum,
     map_dart_type,
     map_dart_type_flet,
     map_return_type,
@@ -108,6 +109,7 @@ class PackageAnalyzer:
         """
         self.min_namespace_methods = min_namespace_methods
         self._known_types: frozenset[str] = frozenset()
+        self._enum_names: frozenset[str] = frozenset()
 
     def analyze(
         self,
@@ -129,6 +131,8 @@ class PackageAnalyzer:
         known.update(e.name for e in api.enums)
         known.update(h.name for h in api.helper_classes)
         self._known_types = frozenset(known)
+        # Package enum names (used to read enum params via parseEnum on Dart side).
+        self._enum_names = frozenset(e.name for e in api.enums)
 
         # Detect the main SDK class (the one matching the control name)
         dart_main_class = self._detect_main_class(api, control_name)
@@ -500,11 +504,17 @@ class PackageAnalyzer:
 
         shared_ratio = len(shared) / med if med > 0 else 0.0
 
-        # Family: ≥5 widgets, OR 2-4 with high overlap (≥0.6)
-        if len(filtered) >= 5 or (2 <= len(filtered) <= 4 and shared_ratio >= 0.6):
+        # Family: interchangeable variants selected by a `type` enum — they must
+        # share most constructor params (e.g. SpinKit's 30 spinners all take
+        # color/size/duration → ratio≈0.75). A high widget count alone is NOT a
+        # family signal: packages like flutter_slidable expose many UNRELATED
+        # widgets (SlidableAction, FlexExitTransition, ActionPane…) with no shared
+        # params (ratio≈0.0) and must fall through to the single-widget path.
+        if len(filtered) >= 2 and shared_ratio >= 0.6:
             return ("family", filtered)
 
-        # Sibling: 2-4 widgets with low overlap
+        # Sibling: 2-4 distinct widgets with low overlap (e.g. Circular/Linear
+        # PercentIndicator).
         if 2 <= len(filtered) <= 4 and shared_ratio < 0.6:
             return ("sibling", filtered)
 
@@ -835,14 +845,17 @@ class PackageAnalyzer:
             if is_list_sub_control:
                 python_type = f"list[{sc_name}]"
                 default_value = "field(default_factory=list)"
-                dart_getter = f'buildWidgets("{python_name}")'
+                # buildWidgets/buildWidget are extension methods on Control
+                # (flet/src/extensions/control.dart) — emit with a `control.`
+                # receiver so the generator rewrites it to `widget.control.`.
+                dart_getter = f'control.buildWidgets("{python_name}")'
             else:
                 is_nullable = param.dart_type.endswith("?")
                 python_type = f"{sc_name} | None" if is_nullable else sc_name
                 default_value = "None"
                 if "None" not in python_type:
                     python_type = f"{python_type} | None"
-                dart_getter = f'buildWidget("{python_name}")'
+                dart_getter = f'control.buildWidget("{python_name}")'
             return PropertyPlan(
                 python_name=python_name,
                 python_type=python_type,
@@ -850,10 +863,33 @@ class PackageAnalyzer:
                 docstring="",
                 dart_name=param.name,
                 dart_getter=dart_getter,
+                dart_type=param.dart_type,
             )
 
         # Convert to Python property (Flet-aware for ui_control)
         if is_ui:
+            # Enum params (package or Flutter framework) that have no native Flet
+            # type are read via parseEnum(<Enum>.values, getString(...)) so the SDK
+            # receives the enum, not a String. Native-mapped types (ft.Alignment,
+            # ft.BoxFit, …) keep their dedicated getters.
+            native = map_dart_type_flet(base_type) or ""
+            if not native.startswith("ft.") and is_known_enum(base_type, self._enum_names):
+                # Package enums get a generated Python Enum; Flutter framework
+                # enums are exposed as plain ``str`` (the value name).
+                python_type = base_type if base_type in self._enum_names else "str"
+                default_value = CodeGenerator._py_default(param.default)
+                if default_value == "None" and "None" not in python_type:
+                    python_type = f"{python_type} | None"
+                enum_getter = f'parseEnum({base_type}.values, control.getString("{python_name}"))'
+                return PropertyPlan(
+                    python_name=python_name,
+                    python_type=python_type,
+                    default_value=default_value,
+                    docstring="",
+                    dart_name=param.name,
+                    dart_getter=enum_getter,
+                    dart_type=param.dart_type,
+                )
             python_type = map_dart_type_flet(param.dart_type)
             if python_type is None:
                 return None
@@ -886,6 +922,7 @@ class PackageAnalyzer:
             docstring="",
             dart_name=param.name,
             dart_getter=dart_getter,
+            dart_type=param.dart_type,
         )
 
     def _detect_sub_controls(
@@ -1527,7 +1564,7 @@ class PackageAnalyzer:
             dart_prefix,
         )
 
-        python_return, _dart_is_async = map_return_type(method.return_type)
+        python_return, dart_is_async = map_return_type(method.return_type)
         # Sanitize return type: replace unknown Dart classes with dict | None
         python_return = _sanitize_python_type(python_return, self._known_types)
 
@@ -1563,7 +1600,9 @@ class PackageAnalyzer:
             return_type=python_return,
             docstring=method.docstring,
             is_async=True,
+            dart_is_async=dart_is_async,
             is_getter=method.is_getter,
+            is_static=method.is_static,
             dart_original_name=method.name,
             dart_class_name=dart_class_name,
         )
@@ -1636,6 +1675,8 @@ class PackageAnalyzer:
             fields=fields,
             dart_listener_method=method.name,
             dart_sdk_accessor="",
+            is_stream=True,
+            stream_is_getter=is_on_getter,
         )
 
     # ------------------------------------------------------------------

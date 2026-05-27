@@ -2,18 +2,36 @@
 name = "{{ package_name }}-example"
 version = "0.1.0"
 description = "Example app for {{ project_name }}"
+readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    "flet>=0.80.0",
-    "{{ project_name }}>=0.1.0",
+    "flet>=0.85.1",
+    "{{ project_name }}",
 ]
 
 [build-system]
 requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
 
+[tool.flet]
+# Bundle metadata used by `flet build` (identifiers, about dialog, etc.).
+org = "com.example"
+product = "{{ package_name }}-example"
+company = "{{ author }}"
+copyright = "Copyright (c) 2026 {{ author }}"
+
 [tool.flet.app]
 path = "src"
 
-[tool.flet.dependencies]
-{{ project_name }} = { path = "../../" }
+# --- Local development only -------------------------------------------------
+# Link the extension package from this repository by path so `flet build`
+# bundles its Flutter package and `uv` installs it in editable mode.
+#
+# If you installed {{ project_name }} from PyPI, DELETE both blocks below:
+# the bundled Flutter package ships inside the wheel and `flet build`
+# extracts and registers it automatically (no path config needed).
+[tool.flet.dev_packages]
+{{ project_name }} = "../.."
+
+[tool.uv.sources]
+{{ project_name }} = { path = "../../", editable = true }

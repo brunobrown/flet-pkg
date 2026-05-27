@@ -78,7 +78,7 @@ def tool_derive_names(flutter_package: str) -> dict:
     if error:
         raise ValueError(f"Invalid flutter_package '{flutter_package}': {error}")
     names = derive_names(flutter_package)
-    return to_dict(names)  # type: ignore[return-value]
+    return to_dict(names)
 
 
 # ---------------------------------------------------------------------------
@@ -131,7 +131,7 @@ def tool_fetch_metadata(flutter_package: str, ctx: ToolContext) -> dict:
     """
     downloader = _get_downloader(ctx)
     metadata = downloader.fetch_metadata(flutter_package)
-    return to_dict(metadata)  # type: ignore[return-value]
+    return to_dict(metadata)
 
 
 # ---------------------------------------------------------------------------
