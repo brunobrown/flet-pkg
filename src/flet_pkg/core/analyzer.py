@@ -504,11 +504,17 @@ class PackageAnalyzer:
 
         shared_ratio = len(shared) / med if med > 0 else 0.0
 
-        # Family: ≥5 widgets, OR 2-4 with high overlap (≥0.6)
-        if len(filtered) >= 5 or (2 <= len(filtered) <= 4 and shared_ratio >= 0.6):
+        # Family: interchangeable variants selected by a `type` enum — they must
+        # share most constructor params (e.g. SpinKit's 30 spinners all take
+        # color/size/duration → ratio≈0.75). A high widget count alone is NOT a
+        # family signal: packages like flutter_slidable expose many UNRELATED
+        # widgets (SlidableAction, FlexExitTransition, ActionPane…) with no shared
+        # params (ratio≈0.0) and must fall through to the single-widget path.
+        if len(filtered) >= 2 and shared_ratio >= 0.6:
             return ("family", filtered)
 
-        # Sibling: 2-4 widgets with low overlap
+        # Sibling: 2-4 distinct widgets with low overlap (e.g. Circular/Linear
+        # PercentIndicator).
         if 2 <= len(filtered) <= 4 and shared_ratio < 0.6:
             return ("sibling", filtered)
 
