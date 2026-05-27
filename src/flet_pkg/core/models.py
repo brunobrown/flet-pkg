@@ -178,6 +178,11 @@ class EventPlan:
     fields: list[tuple[str, str]] = field(default_factory=list)
     dart_listener_method: str = ""
     dart_sdk_accessor: str = ""
+    is_stream: bool = False
+    """True when the event source is a Dart ``Stream`` → dispatch via ``.listen(...)``."""
+    stream_is_getter: bool = False
+    """True when the stream is a getter (``stream.listen``); False when it is a
+    method returning a stream (``getStream().listen``)."""
 
     def __post_init__(self):
         if not self.dart_event_name:

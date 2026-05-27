@@ -274,6 +274,39 @@ class TestDartServiceGenerator:
         content = DartServiceGenerator().generate(sample_plan)["one_signal_service.dart"]
         assert "_parse" not in content
 
+    def test_stream_event_uses_listen_on_instance(self):
+        """A stream-getter event must dispatch via `.listen(...)` on the instance.
+
+        `Battery().onBatteryStateChanged` is an instance Stream getter — emitting
+        `Battery.onBatteryStateChanged((event){...})` causes both
+        static_access_to_instance_member and invocation_of_non_function_expression.
+        """
+        plan = GenerationPlan(
+            control_name="Battery",
+            package_name="flet_battery",
+            base_class="ft.Service",
+            flutter_package="battery_plus",
+            dart_import="package:battery_plus/battery_plus.dart",
+            dart_main_class="Battery",
+            events=[
+                EventPlan(
+                    python_attr_name="on_battery_state_changed",
+                    event_class_name="BatteryBatteryStateEvent",
+                    dart_event_name="battery_state_changed",
+                    dart_listener_method="onBatteryStateChanged",
+                    fields=[("value", "str")],
+                    is_stream=True,
+                    stream_is_getter=True,
+                ),
+            ],
+        )
+        content = DartServiceGenerator().generate(plan)["battery_service.dart"]
+        assert "final Battery _battery = Battery();" in content
+        assert "_battery.onBatteryStateChanged.listen((event) {" in content
+        # No static access, no direct invocation of the stream getter.
+        assert "Battery.onBatteryStateChanged" not in content.replace("_battery.", "")
+        assert "_battery.onBatteryStateChanged((event)" not in content
+
     def test_dart_convert_import_only_when_used(self, sample_plan):
         """`import 'dart:convert'` only when jsonEncode/jsonDecode is actually used."""
         gen = DartServiceGenerator()
@@ -691,6 +724,52 @@ class TestSubControlGeneration:
         content = DartServiceGenerator().generate(plan)["wrapper_control.dart"]
         # In the Wrapper(...) constructor call, `padding:` must precede `child:`.
         assert content.index("padding: padding,") < content.index("child: child,")
+
+    def test_nonnull_numeric_getter_coalesced(self):
+        """Nullable numeric getters feeding a non-null param must be coalesced.
+
+        `getDouble`/`getInt` return `double?`/`int?` — a non-null SDK param needs
+        `?? 0.0`/`?? 0`; a nullable param is forwarded as-is.
+        """
+        plan = GenerationPlan(
+            control_name="Gauge",
+            package_name="flet_gauge",
+            base_class="ft.LayoutControl",
+            flutter_package="gauge",
+            dart_import="package:gauge/gauge.dart",
+            dart_main_class="Gauge",
+            properties=[
+                PropertyPlan(
+                    python_name="size",
+                    python_type="ft.Number | None",
+                    default_value="None",
+                    dart_name="size",
+                    dart_getter='control.getDouble("size")',
+                    dart_type="double",  # non-null → coalesce
+                ),
+                PropertyPlan(
+                    python_name="count",
+                    python_type="int | None",
+                    default_value="None",
+                    dart_name="count",
+                    dart_getter='control.getInt("count")',
+                    dart_type="int",  # non-null → coalesce
+                ),
+                PropertyPlan(
+                    python_name="max_value",
+                    python_type="ft.Number | None",
+                    default_value="None",
+                    dart_name="maxValue",
+                    dart_getter='control.getDouble("max_value")',
+                    dart_type="double?",  # nullable → forward as-is
+                ),
+            ],
+        )
+        content = DartServiceGenerator().generate(plan)["gauge_control.dart"]
+        assert 'final size = widget.control.getDouble("size") ?? 0.0;' in content
+        assert 'final count = widget.control.getInt("count") ?? 0;' in content
+        assert 'final maxValue = widget.control.getDouble("max_value");' in content
+        assert 'getDouble("max_value") ?? 0.0' not in content
 
 
 # ---------------------------------------------------------------------------

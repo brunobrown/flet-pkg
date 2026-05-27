@@ -1643,6 +1643,8 @@ class PackageAnalyzer:
             fields=fields,
             dart_listener_method=method.name,
             dart_sdk_accessor="",
+            is_stream=True,
+            stream_is_getter=is_on_getter,
         )
 
     # ------------------------------------------------------------------

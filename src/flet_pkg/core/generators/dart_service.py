@@ -63,9 +63,15 @@ class DartServiceGenerator(CodeGenerator):
         for sub in plan.sub_modules:
             all_methods.extend(sub.methods)
         instance_var = f"_{main_class[0].lower()}{main_class[1:]}" if main_class else "_sdk"
-        needs_instance = any(
-            self._method_uses_instance(m, self._find_sub_module_for_method(m, plan))
-            for m in all_methods
+        # A main-class event (no sub-module accessor) is typically an instance
+        # stream getter (e.g. Battery().onBatteryStateChanged) → needs an instance.
+        has_main_class_event = any(not e.dart_sdk_accessor for e in plan.events)
+        needs_instance = (
+            any(
+                self._method_uses_instance(m, self._find_sub_module_for_method(m, plan))
+                for m in all_methods
+            )
+            or has_main_class_event
         )
 
         lines: list[str] = []
@@ -133,7 +139,7 @@ class DartServiceGenerator(CodeGenerator):
         self._render_initialize(lines, plan, class_name)
 
         # _setupListeners with real event listeners
-        self._render_setup_listeners(lines, plan, class_name)
+        self._render_setup_listeners(lines, plan, class_name, instance_var, needs_instance)
 
         # _onInvokeMethod with switch dispatch
         self._render_invoke_method(lines, plan)
@@ -224,7 +230,7 @@ class DartServiceGenerator(CodeGenerator):
                         getter_expr = prop.dart_getter
                     else:
                         getter_expr = prop.dart_getter.replace("control.", "widget.control.")
-                    getter_expr = _coalesce_child_getter(getter_expr, prop.dart_type)
+                    getter_expr = _coalesce_nonnull_getter(getter_expr, prop.dart_type)
                     lines.append(f"      final {dart_var} = {getter_expr};")
                 else:
                     # Fallback to getString
@@ -352,7 +358,7 @@ class DartServiceGenerator(CodeGenerator):
                 dart_var = _to_camel_case(prop.python_name)
                 if prop.dart_getter:
                     getter_expr = prop.dart_getter.replace("control.", "widget.control.")
-                    getter_expr = _coalesce_child_getter(getter_expr, prop.dart_type)
+                    getter_expr = _coalesce_nonnull_getter(getter_expr, prop.dart_type)
                     lines.append(f"      final {dart_var} = {getter_expr};")
                 else:
                     lines.append(
@@ -465,7 +471,7 @@ class DartServiceGenerator(CodeGenerator):
                     getter_expr = prop.dart_getter
                 else:
                     getter_expr = prop.dart_getter.replace("control.", "widget.control.")
-                getter_expr = _coalesce_child_getter(getter_expr, prop.dart_type)
+                getter_expr = _coalesce_nonnull_getter(getter_expr, prop.dart_type)
                 lines.append(f"      final {dart_var} = {getter_expr};")
             else:
                 lines.append(
@@ -586,26 +592,46 @@ class DartServiceGenerator(CodeGenerator):
     # ------------------------------------------------------------------
 
     def _render_setup_listeners(
-        self, lines: list[str], plan: GenerationPlan, class_name: str
+        self,
+        lines: list[str],
+        plan: GenerationPlan,
+        class_name: str,
+        instance_var: str = "",
+        needs_instance: bool = False,
     ) -> None:
         lines.append("  /// Setup all event listeners.")
         lines.append("  void _setupListeners() {")
         lines.append("    if (_listenersSetup) return;")
         lines.append("    _listenersSetup = true;")
 
+        # A main-class stream getter is an instance member — dispatch on the
+        # instance var, not the class name (avoids static_access_to_instance_member).
+        main_accessor = (
+            instance_var if needs_instance else (plan.dart_main_class or plan.control_name)
+        )
+
         if plan.events:
             lines.append("")
             for event in plan.events:
-                accessor = event.dart_sdk_accessor or plan.dart_main_class
+                accessor = event.dart_sdk_accessor or main_accessor
                 listener_method = event.dart_listener_method
                 event_name = event.dart_event_name
 
                 if not listener_method:
                     continue
 
-                # Generate real listener registration
+                # Generate real listener registration. A Dart Stream is
+                # subscribed via `.listen(...)`; a stream getter has no call
+                # parens, a stream-returning method does. Callback-registration
+                # APIs (non-stream) take the handler directly.
                 lines.append(f"    // {event.python_attr_name}")
-                lines.append(f"    {accessor}.{listener_method}((event) {{")
+                if event.is_stream:
+                    stream_expr = f"{accessor}.{listener_method}"
+                    if not event.stream_is_getter:
+                        stream_expr += "()"
+                    lines.append(f"    {stream_expr}.listen((event) {{")
+                else:
+                    lines.append(f"    {accessor}.{listener_method}((event) {{")
                 lines.append("      try {")
                 lines.append(f'        control.triggerEvent("{event_name}", {{')
 
@@ -878,17 +904,27 @@ def _to_camel_case(snake_name: str) -> str:
     return parts[0] + "".join(p.capitalize() for p in parts[1:])
 
 
-def _coalesce_child_getter(getter_expr: str, dart_type: str) -> str:
-    """Add a ``?? const SizedBox.shrink()`` fallback to a single-child getter.
+def _coalesce_nonnull_getter(getter_expr: str, dart_type: str) -> str:
+    """Coalesce a nullable getter feeding a non-nullable SDK parameter.
 
-    ``Control.buildWidget()`` returns ``Widget?``; passing it to a non-nullable
-    SDK constructor parameter raises ``argument_type_not_assignable`` in
-    ``flutter analyze``. When the Dart param is nullable (``Widget?``) the value
-    is forwarded as-is. List children (``buildWidgets``) already return a
-    non-null ``List<Widget>`` and are left untouched.
+    Flet getters return nullable values (``buildWidget`` → ``Widget?``,
+    ``getDouble`` → ``double?``, ``getInt`` → ``int?``, ``getString`` →
+    ``String?``); passing them to a non-nullable SDK parameter raises
+    ``argument_type_not_assignable`` in ``flutter analyze``. When the Dart param
+    is nullable (ends with ``?``) the value is forwarded as-is. List children
+    (``buildWidgets`` → non-null ``List<Widget>``) and ``getBool`` (already
+    ``!``-coalesced) are left untouched.
     """
-    if "buildWidget(" in getter_expr and not dart_type.endswith("?"):
+    if dart_type.endswith("?"):
+        return getter_expr  # param accepts null
+    if "buildWidget(" in getter_expr:
         return f"{getter_expr} ?? const SizedBox.shrink()"
+    if "getDouble(" in getter_expr:
+        return f"{getter_expr} ?? 0.0"
+    if "getInt(" in getter_expr:
+        return f"{getter_expr} ?? 0"
+    if "getString(" in getter_expr:
+        return f'{getter_expr} ?? ""'
     return getter_expr
 
 
