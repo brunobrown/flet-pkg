@@ -1,7 +1,7 @@
 """Generator for the main Python control file.
 
 Produces the primary control class (e.g., ``onesignal.py``) following
-the Flet 0.80.x+ extension pattern with ``@ft.control()``, sub-module
+the Flet 0.85.x+ extension pattern with ``@ft.control()``, sub-module
 properties, event handlers, and async methods.
 """
 
