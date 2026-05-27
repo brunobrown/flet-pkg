@@ -265,6 +265,38 @@ class TestDartServiceGenerator:
         content = files["one_signal_service.dart"]
         assert "package:onesignal_flutter/onesignal_flutter.dart" in content
 
+    def test_no_unused_enum_parser_helpers(self, sample_plan):
+        """Enum parser helpers were dead code (never called) → must not be emitted.
+
+        sample_plan has an OSLogLevel enum; the service must NOT contain a
+        `_parseOSLogLevel` helper (it would be an unused_element in analyze).
+        """
+        content = DartServiceGenerator().generate(sample_plan)["one_signal_service.dart"]
+        assert "_parse" not in content
+
+    def test_dart_convert_import_only_when_used(self, sample_plan):
+        """`import 'dart:convert'` only when jsonEncode/jsonDecode is actually used."""
+        gen = DartServiceGenerator()
+        # sample_plan has get_tags() returning dict → jsonEncode → needs convert.
+        used = gen.generate(sample_plan)["one_signal_service.dart"]
+        assert "import 'dart:convert';" in used
+        assert "jsonEncode" in used
+
+        # A plan with only simple (str/None) returns must NOT import dart:convert.
+        plan = GenerationPlan(
+            control_name="Simple",
+            package_name="flet_simple",
+            base_class="ft.Service",
+            flutter_package="simple",
+            dart_import="package:simple/simple.dart",
+            dart_main_class="Simple",
+            main_methods=[
+                MethodPlan(python_name="ping", dart_method_name="ping", return_type="None")
+            ],
+        )
+        unused = DartServiceGenerator().generate(plan)["simple_service.dart"]
+        assert "import 'dart:convert';" not in unused
+
     def test_sync_method_is_not_awaited(self):
         """Synchronous (non-Future) SDK calls must not be awaited.
 
@@ -627,6 +659,38 @@ class TestSubControlGeneration:
         )
         assert 'final placeholder = widget.control.buildWidget("placeholder");' in content
         assert 'placeholder") ?? const SizedBox.shrink()' not in content
+
+    def test_child_property_is_last_in_constructor(self):
+        """Child (Widget) ctor args must come last (Dart sort_child_properties_last)."""
+        plan = GenerationPlan(
+            control_name="Wrapper",
+            package_name="flet_wrapper",
+            base_class="ft.LayoutControl",
+            flutter_package="wrapper",
+            dart_import="package:wrapper/wrapper.dart",
+            dart_main_class="Wrapper",
+            properties=[
+                PropertyPlan(
+                    python_name="child",
+                    python_type="ft.Control | None",
+                    default_value="None",
+                    dart_name="child",
+                    dart_getter='control.buildWidget("child")',
+                    dart_type="Widget?",
+                ),
+                PropertyPlan(
+                    python_name="padding",
+                    python_type="ft.Number | None",
+                    default_value="None",
+                    dart_name="padding",
+                    dart_getter='control.getDouble("padding")',
+                    dart_type="double",
+                ),
+            ],
+        )
+        content = DartServiceGenerator().generate(plan)["wrapper_control.dart"]
+        # In the Wrapper(...) constructor call, `padding:` must precede `child:`.
+        assert content.index("padding: padding,") < content.index("child: child,")
 
 
 # ---------------------------------------------------------------------------

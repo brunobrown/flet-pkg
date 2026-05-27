@@ -70,8 +70,17 @@ class DartServiceGenerator(CodeGenerator):
 
         lines: list[str] = []
 
+        # `dart:convert` is only used for jsonEncode (no-param methods returning
+        # dict/list) and jsonDecode (event fields of type "dict"). Import it
+        # only when actually used to avoid an `unused_import` warning.
+        needs_json = any(
+            not m.params and (m.return_type.startswith("dict") or m.return_type.startswith("list"))
+            for m in all_methods
+        ) or any(ftype == "dict" for ev in plan.events for _fname, ftype in ev.fields)
+
         # Imports
-        lines.append("import 'dart:convert';")
+        if needs_json:
+            lines.append("import 'dart:convert';")
         lines.append("import 'package:flet/flet.dart';")
         lines.append("import 'package:flutter/foundation.dart';")
         if plan.dart_import:
@@ -125,9 +134,6 @@ class DartServiceGenerator(CodeGenerator):
 
         # _setupListeners with real event listeners
         self._render_setup_listeners(lines, plan, class_name)
-
-        # Enum parser helpers (if plan uses enums in methods)
-        self._render_enum_helpers(lines, plan)
 
         # _onInvokeMethod with switch dispatch
         self._render_invoke_method(lines, plan)
@@ -261,7 +267,7 @@ class DartServiceGenerator(CodeGenerator):
             lines.append("      return LayoutControl(")
             lines.append("        control: widget.control,")
             lines.append(f"        child: {sdk_class}(")
-            for prop in plan.properties:
+            for prop in _ctor_arg_order(plan.properties):
                 dart_var = _to_camel_case(prop.python_name)
                 # Use the original Dart param name for the constructor
                 dart_param = prop.dart_name or prop.python_name
@@ -358,7 +364,7 @@ class DartServiceGenerator(CodeGenerator):
         lines.append("      return LayoutControl(")
         lines.append("        control: widget.control,")
         lines.append(f"        child: {sdk_class}(")
-        for prop in sibling.properties:
+        for prop in _ctor_arg_order(sibling.properties):
             dart_var = _to_camel_case(prop.python_name)
             dart_param = prop.dart_name or prop.python_name
             lines.append(f"          {dart_param}: {dart_var},")
@@ -471,7 +477,7 @@ class DartServiceGenerator(CodeGenerator):
 
         # Build constructor call
         lines.append(f"      return {sub.dart_class_name}(")
-        for prop in sub.properties:
+        for prop in _ctor_arg_order(sub.properties):
             dart_var = _to_camel_case(prop.python_name)
             dart_param = prop.dart_name or prop.python_name
             lines.append(f"        {dart_param}: {dart_var},")
@@ -638,22 +644,6 @@ class DartServiceGenerator(CodeGenerator):
     # ------------------------------------------------------------------
     # Enum parser helpers
     # ------------------------------------------------------------------
-
-    def _render_enum_helpers(self, lines: list[str], plan: GenerationPlan) -> None:
-        """Render helper methods to parse enum string values."""
-        for enum in plan.enums:
-            dart_name = enum.python_name
-            lines.append(f"  {dart_name} _parse{dart_name}(String value) {{")
-            lines.append("    return switch (value.toLowerCase()) {")
-            for val_name, val_value, _val_doc in enum.values:
-                lines.append(f'      "{val_value}" => {dart_name}.{val_name},')
-            # Default fallback
-            if enum.values:
-                default_val = enum.values[0][0]
-                lines.append(f"      _ => {dart_name}.{default_val},")
-            lines.append("    };")
-            lines.append("  }")
-            lines.append("")
 
     # ------------------------------------------------------------------
     # _onInvokeMethod dispatch
@@ -900,6 +890,20 @@ def _coalesce_child_getter(getter_expr: str, dart_type: str) -> str:
     if "buildWidget(" in getter_expr and not dart_type.endswith("?"):
         return f"{getter_expr} ?? const SizedBox.shrink()"
     return getter_expr
+
+
+def _ctor_arg_order(props):
+    """Order SDK constructor args so child/children (Widget) params come last.
+
+    Satisfies the Dart `sort_child_properties_last` lint. Stable for all other
+    params. Child params are detected by their buildWidget/buildWidgets getter.
+    """
+
+    def _is_child(p) -> bool:
+        getter = p.dart_getter or ""
+        return "buildWidget(" in getter or "buildWidgets(" in getter
+
+    return [p for p in props if not _is_child(p)] + [p for p in props if _is_child(p)]
 
 
 _DART_RESERVED = frozenset(
