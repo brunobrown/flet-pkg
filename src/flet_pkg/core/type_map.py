@@ -90,7 +90,7 @@ _FLET_DART_GETTER_MAP: dict[str, str] = {
     "ft.Alignment": 'control.getAlignment("{name}")',
     "ft.BoxFit": 'control.getBoxFit("{name}")',
     "ft.Rect": 'control.getRect("{name}")',
-    "ft.Color": 'control.getString("{name}")',
+    "ft.Color": 'control.getColor("{name}", context)',
     "ft.Number": 'control.getDouble("{name}")',
     "ft.Control": 'control.buildWidget("{name}")',
     "ft.TextStyle": 'control.getTextStyle("{name}", Theme.of(context))',

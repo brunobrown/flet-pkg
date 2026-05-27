@@ -543,6 +543,14 @@ def _parse_param(param_str: str, is_named_section: bool) -> DartParam | None:
     if not param_str:
         return None
 
+    # Remove annotations like @Deprecated BEFORE anything else. They may span
+    # multiple lines (e.g. `@Deprecated("...long msg...")`) — stripping them
+    # first prevents the multi-line text from defeating the default-value regex
+    # (`.` doesn't cross newlines), which otherwise mis-parsed the param name.
+    param_str = re.sub(r"@\w+(\([^)]*\))?\s*", "", param_str).strip()
+    # Collapse any remaining internal whitespace/newlines to single spaces.
+    param_str = " ".join(param_str.split())
+
     required = False
     if param_str.startswith("required "):
         required = True
@@ -554,9 +562,6 @@ def _parse_param(param_str: str, is_named_section: bool) -> DartParam | None:
     if default_match:
         param_str = default_match.group(1).strip()
         default = default_match.group(2).strip()
-
-    # Remove annotations like @Deprecated
-    param_str = re.sub(r"@\w+(\([^)]*\))?\s*", "", param_str).strip()
 
     parts = param_str.split()
     if len(parts) < 2:

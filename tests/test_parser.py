@@ -105,3 +105,29 @@ class Foo {
         names = {m.name for m in _parse_class_methods(src)}
         assert "bar" in names
         assert "oldThing" not in names
+
+
+class TestParamParsing:
+    """Constructor/method parameter parsing edge cases."""
+
+    def test_param_with_multiline_deprecated_annotation_and_default(self):
+        """A param annotated with a multi-line @Deprecated and a default must
+        parse its name/type/default correctly (regression: the name was parsed
+        as the keyword `false`, emitting an invalid `false:` Dart arg)."""
+        src = """
+class Geolocator {
+  static Future<Position> getCurrentPosition({
+    LocationSettings? locationSettings,
+    @Deprecated(
+        "use settings parameter with AndroidSettings, AppleSettings")
+    bool forceAndroidLocationManager = false,
+  }) async {}
+}
+"""
+        methods = _parse_class_methods(src)
+        params = {p.name: p for m in methods for p in m.params}
+        assert "false" not in params
+        assert "forceAndroidLocationManager" in params
+        p = params["forceAndroidLocationManager"]
+        assert p.dart_type == "bool"
+        assert p.default == "false"
