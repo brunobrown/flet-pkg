@@ -4,6 +4,8 @@ Produces the Dart service (or widget) implementation that handles
 method dispatch from Python, event listener setup, and real SDK calls.
 """
 
+import re
+
 from flet_pkg.core.generators.base import CodeGenerator
 from flet_pkg.core.models import (
     GenerationPlan,
@@ -758,9 +760,9 @@ class DartServiceGenerator(CodeGenerator):
             lines.append(f"  Future<String?> {impl_name}(Map<String, dynamic> args) async {{")
             # Extract arguments using python_name as key (matches what Python sends)
             for p in method.params:
-                dart_type = _dart_cast_type(p.dart_type)
                 var_name = _safe_dart_var(p.dart_name)
-                lines.append(f'    final {var_name} = args["{p.python_name}"] as {dart_type};')
+                extraction = _dart_arg_extraction(p.python_name, p.dart_type)
+                lines.append(f"    final {var_name} = {extraction};")
 
             # Build null check condition for required params
             required_params = [p for p in method.params if not p.is_optional]
@@ -1006,3 +1008,20 @@ def _dart_cast_type(dart_type: str) -> str:
     if dart_type.startswith("List"):
         return "List?"
     return "dynamic"
+
+
+def _dart_arg_extraction(key: str, dart_type: str) -> str:
+    """Build the RHS expression to extract a method argument from ``args``.
+
+    JSON arrives as ``List<dynamic>``/``Map<dynamic, dynamic>``, so a typed SDK
+    param like ``List<String>`` needs ``.cast<String>()`` (a plain
+    ``as List<String>`` throws at runtime). Preserves the element types so the
+    SDK call type-checks instead of failing with ``List<dynamic>`` mismatches.
+    """
+    base = dart_type.strip().rstrip("?")
+    inner_match = re.match(r"(List|Map|Set)<(.+)>$", base)
+    if inner_match:
+        outer, inner = inner_match.group(1), inner_match.group(2).strip()
+        if inner and inner != "dynamic" and "dynamic" not in inner:
+            return f'(args["{key}"] as {outer}?)?.cast<{inner}>()'
+    return f'args["{key}"] as {_dart_cast_type(dart_type)}'

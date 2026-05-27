@@ -274,6 +274,37 @@ class TestDartServiceGenerator:
         content = DartServiceGenerator().generate(sample_plan)["one_signal_service.dart"]
         assert "_parse" not in content
 
+    def test_typed_list_arg_uses_cast(self):
+        """A List<String>/Map<String,String> param must use .cast<T>() (JSON is
+        List<dynamic>) so the SDK call type-checks instead of List<dynamic> mismatch."""
+        plan = GenerationPlan(
+            control_name="Tagger",
+            package_name="flet_tagger",
+            base_class="ft.Service",
+            flutter_package="tagger",
+            dart_import="package:tagger/tagger.dart",
+            dart_main_class="Tagger",
+            main_methods=[
+                MethodPlan(
+                    python_name="remove_aliases",
+                    dart_method_name="remove_aliases",
+                    dart_original_name="removeAliases",
+                    params=[
+                        ParamPlan(
+                            python_name="aliases",
+                            python_type="list[str]",
+                            dart_name="aliases",
+                            dart_type="List<String>",
+                        )
+                    ],
+                    return_type="None",
+                ),
+            ],
+        )
+        content = DartServiceGenerator().generate(plan)["tagger_service.dart"]
+        assert 'final aliases = (args["aliases"] as List?)?.cast<String>();' in content
+        assert "as List<String>" not in content
+
     def test_stream_event_uses_listen_on_instance(self):
         """A stream-getter event must dispatch via `.listen(...)` on the instance.
 
