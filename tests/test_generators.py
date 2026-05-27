@@ -771,6 +771,51 @@ class TestSubControlGeneration:
         assert 'final maxValue = widget.control.getDouble("max_value");' in content
         assert 'getDouble("max_value") ?? 0.0' not in content
 
+    def test_enum_parseenum_getter_coalesced(self):
+        """A parseEnum getter feeding a non-null enum param must coalesce with
+        ``<Enum>.values.first``; a nullable enum param is forwarded as-is."""
+        plan = GenerationPlan(
+            control_name="Flow",
+            package_name="flet_flow",
+            base_class="ft.LayoutControl",
+            flutter_package="flow",
+            dart_import="package:flow/flow.dart",
+            dart_main_class="Flow",
+            properties=[
+                PropertyPlan(
+                    python_name="direction",
+                    python_type="str | None",
+                    default_value="None",
+                    dart_name="direction",
+                    dart_getter='parseEnum(Axis.values, control.getString("direction"))',
+                    dart_type="Axis",  # non-null → coalesce
+                ),
+                PropertyPlan(
+                    python_name="text_direction",
+                    python_type="str | None",
+                    default_value="None",
+                    dart_name="textDirection",
+                    dart_getter=(
+                        'parseEnum(TextDirection.values, control.getString("text_direction"))'
+                    ),
+                    dart_type="TextDirection?",  # nullable → as-is
+                ),
+            ],
+        )
+        content = DartServiceGenerator().generate(plan)["flow_control.dart"]
+        assert (
+            'parseEnum(Axis.values, widget.control.getString("direction")) ?? Axis.values.first'
+            in content
+        )
+        assert (
+            "final textDirection = parseEnum(TextDirection.values, "
+            'widget.control.getString("text_direction"));' in content
+        )
+        # nullable enum must NOT be coalesced, and getString-inside-parseEnum must
+        # not get a stray `?? ""`.
+        assert "TextDirection.values.first" not in content
+        assert '")) ?? ""' not in content
+
 
 # ---------------------------------------------------------------------------
 # Widget Family generation tests

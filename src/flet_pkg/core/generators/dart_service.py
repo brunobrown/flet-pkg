@@ -917,6 +917,11 @@ def _coalesce_nonnull_getter(getter_expr: str, dart_type: str) -> str:
     """
     if dart_type.endswith("?"):
         return getter_expr  # param accepts null
+    # parseEnum(<Enum>.values, getString(...)) → coalesce with the first value.
+    # Checked before getString since the call is nested inside parseEnum.
+    if "parseEnum(" in getter_expr:
+        enum_type = getter_expr.split("parseEnum(", 1)[1].split(".values", 1)[0].strip()
+        return f"{getter_expr} ?? {enum_type}.values.first"
     if "buildWidget(" in getter_expr:
         return f"{getter_expr} ?? const SizedBox.shrink()"
     if "getDouble(" in getter_expr:

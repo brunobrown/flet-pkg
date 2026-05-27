@@ -100,6 +100,51 @@ _FLET_DART_GETTER_MAP: dict[str, str] = {
     "str": 'control.getString("{name}")',
 }
 
+# Common Flutter framework enums. Constructor params of these types are read on
+# the Dart side via ``parseEnum(<Enum>.values, getString(...))`` and exposed as
+# plain ``str`` on the Python side (the user passes the enum value name). They are
+# NOT in ``_FLET_TYPE_MAP`` because Flet has no native Python equivalent for them.
+_FLUTTER_ENUMS: frozenset[str] = frozenset(
+    {
+        "Axis",
+        "MainAxisAlignment",
+        "MainAxisSize",
+        "CrossAxisAlignment",
+        "WrapAlignment",
+        "WrapCrossAlignment",
+        "TextDirection",
+        "TextAlign",
+        "TextOverflow",
+        "TextBaseline",
+        "TextLeadingDistribution",
+        "VerticalDirection",
+        "FontStyle",
+        "Clip",
+        "BlendMode",
+        "BoxShape",
+        "StackFit",
+        "FlexFit",
+        "FilterQuality",
+        "ImageRepeat",
+        "BorderStyle",
+        "Orientation",
+        "TileMode",
+        "PlaceholderAlignment",
+        "OverflowBoxFit",
+    }
+)
+
+
+def is_known_enum(base_type: str, package_enums: frozenset[str]) -> bool:
+    """True if a bare Dart type name is a known enum (package or Flutter framework).
+
+    Used by the analyzer to decide whether a UI property should be read via
+    ``parseEnum(<Enum>.values, getString(...))`` instead of the ``getString``
+    fallback (which would mis-type the SDK argument).
+    """
+    return base_type in package_enums or base_type in _FLUTTER_ENUMS
+
+
 # Regex to extract generic type parameters: e.g. List<String> -> ("List", "String")
 _GENERIC_RE = re.compile(r"^(\w+)\s*<(.+)>$")
 
