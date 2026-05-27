@@ -1,5 +1,52 @@
 # Changelog
 
+## [0.2.0] - 2026-05-27
+
+Major quality release: generated extensions are now aligned to **Flet 0.85.x** and
+compile far more cleanly. Across a 5-package end-to-end audit, `flutter analyze`
+errors on generated extensions dropped ~68% (simple services now compile with zero
+errors). The generated Dart remains a reviewable scaffold — advanced cases
+(required callbacks, complex SDK config types) are documented TODOs.
+
+### Added
+
+- **Mermaid diagrams** in the docs (enabled via `pymdownx.superfences`): architecture
+  overview, generation pipeline, core data-model class diagram, AI-refinement flow, and
+  the Python↔Dart communication bridge (in both project docs and generated extensions).
+- **Post-creation guidance** — the `create` "Next Steps" panel and generated guides now
+  explain testing via `flet build` (not `flet run`, which only knows built-in controls),
+  resolving the most common point of confusion (GitHub issue #6).
+
+### Changed
+
+- **Flet 0.85 alignment** — generated Dart uses the canonical `class Extension extends
+  FletExtension` with `createWidget`/`createService`; the widget class is `{Control}Control`
+  in `lib/src/{snake}_control.dart`; pins bumped to `flet>=0.85.1` / `flet: ^0.85.1`.
+- **Example app wiring** — example `pyproject.toml` now uses `[tool.flet.dev_packages]`,
+  `[tool.uv.sources]` (editable), and `[tool.flet]` metadata (the non-existent
+  `[tool.flet.dependencies]` was removed).
+- **Docs updated to Flet 0.85.x** patterns (`@ft.control`, `ft.LayoutControl`,
+  `_invoke_method`), correct author URL, and a "trying out your extension" section.
+
+### Fixed — Dart bridge generation (service & UI control)
+
+- UI control widget/file naming aligned to the official convention (`{Control}Control` /
+  `{snake}_control.dart`) so the exported `extension.dart` compiles.
+- Synchronous SDK calls/getters are no longer `await`ed (`await_only_futures` /
+  `use_of_void_result`); stream events dispatch via `.listen(...)` on the SDK instance.
+- `buildWidget`/`buildWidgets` are called on `widget.control` (the Control extension
+  receiver) instead of as undefined bare calls.
+- Non-nullable params are coalesced: child widgets (`?? const SizedBox.shrink()`),
+  numeric/string getters (`?? 0.0` / `?? 0` / `?? ""`), enums (`?? <Enum>.values.first`).
+- `ft.Color` reads via `getColor("name", context)`; Flutter/package enums read via
+  `parseEnum(<Enum>.values, getString(...))`; typed `List`/`Map` args use `.cast<T>()`.
+- Static-access on instance members fixed; `@visibleForTesting`/`@protected` and
+  example-app (`lib/main.dart`) classes are filtered out of generation.
+- Widget-family detection no longer groups unrelated widgets as variants (requires shared
+  constructor params); the dialog API and version strings updated to 0.85.
+- Parser: params annotated with a multi-line `@Deprecated(...)` and a default no longer
+  mis-parse the parameter name.
+
 ## [0.1.1] - 2026-03-05
 
 ### Added

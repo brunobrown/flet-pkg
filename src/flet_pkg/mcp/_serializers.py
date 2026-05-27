@@ -3,9 +3,10 @@
 import dataclasses
 from enum import Enum
 from pathlib import Path
+from typing import Any
 
 
-def to_dict(obj: object) -> object:
+def to_dict(obj: object) -> Any:
     """Recursively convert dataclass/Path/Enum/tuple to JSON-safe dict."""
     if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
         return {f.name: to_dict(getattr(obj, f.name)) for f in dataclasses.fields(obj)}
